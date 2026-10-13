@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
+import { Alert, View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTasks, Priority } from '../context/task-context';
 import { suggestPriority } from '../utils/suggest-priority';
+
 
 const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
 
@@ -13,8 +14,20 @@ export default function AddTask() {
   const [newTag, setNewTag] = useState('');
   const [important, setImportant] = useState(false);
   const [priorityOverride, setPriorityOverride] = useState<Priority | null>(null);
-  const { addTask, tags, addTag } = useTasks();
+  const  { addTask, updateTask, tasks, tags, addTag, deleteTask} = useTasks();
   const router = useRouter();
+
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const editing = id ? tasks.find(t => t.id === id) : undefined;
+
+// This tab stays mounted, so state must be re-filled whenever the id changes
+useEffect(() => {
+  setTitle(editing?.title ?? '');
+  setDeadline(editing?.deadline ?? '');
+  setTag(editing?.tag);
+  setImportant(editing?.important ?? false);
+  setPriorityOverride(editing?.priority ?? null);
+}, [id]);
 
   const suggested = suggestPriority(deadline || undefined, important);
   const priority = priorityOverride ?? suggested;
@@ -25,11 +38,12 @@ export default function AddTask() {
     setTag(newTag.trim());
     setNewTag('');
   };
-
-
+  
 const handleSubmit = () => {
   if (!title.trim()) return;
-  addTask({ title, deadline: deadline || undefined, tag, important, priority });
+  const data = { title, deadline: deadline || undefined, tag, important, priority };
+  if (editing) updateTask(editing.id, data);
+  else addTask(data);
   setTitle('');
   setDeadline('');
   setTag(undefined);
@@ -39,10 +53,21 @@ const handleSubmit = () => {
   router.back();
 };
 
+const handleDelete = () => {
+  if (!editing) return;
+  Alert.alert('Delete this task?', "This can't be undone.", [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () => { deleteTask(editing.id); router.back(); },
+    },
+  ]);
+};
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.header}>Add Task</Text>
+      <Text style={styles.header}>{editing ? 'Edit Task' : 'Add Task'}</Text>
 
       <TextInput style={styles.input} placeholder="Task name" value={title} onChangeText={setTitle} />
       <TextInput
@@ -92,7 +117,12 @@ const handleSubmit = () => {
         ))}
       </View>
 
-      <Button title="Save Task" onPress={handleSubmit} />
+      <Button title={editing ? 'Save Changes' : 'Save Task'} onPress={handleSubmit}/>
+        {editing && (
+        <Pressable style={styles.deleteButton} onPress={handleDelete}>
+          <Text style={styles.deleteText}>Delete task</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -110,4 +140,6 @@ const styles = StyleSheet.create({
   customTagInput: { flex: 1, marginBottom: 0 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
   switchLabel: { fontSize: 16 },
+  deleteButton: { marginTop: 40, alignItems: 'center', padding: 12 },
+  deleteText: { color: '#888', fontSize: 15 },
 });

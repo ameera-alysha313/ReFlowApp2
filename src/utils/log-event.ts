@@ -3,9 +3,10 @@ import { db } from '../../config/firebaseConfig';
 
 export type EventType =
   | 'task_created' | 'task_completed' | 'task_uncompleted'
+  | 'task_updated' | 'task_deleted'
   | 'task_postponed' | 'task_abandoned'
   | 'mode_switched'
-  | 'focus_started' | 'focus_ended';
+  | 'focus_started' | 'focus_ended' | 'focus_task_switched';
 
 export function logEvent(
   uid: string | null,

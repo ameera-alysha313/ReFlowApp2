@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
+import {FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTasks, Task, Priority } from '../context/task-context';
 import { useMode } from '../context/mode-context';
-import { getModeView, deadlineLabel, daysUntil, MEDIUM_WINDOW_DAYS } from '../utils/mode-view';
+import {getDoneToday, getModeView, deadlineLabel, daysUntil, MEDIUM_WINDOW_DAYS } from '../utils/mode-view';
 import RecoveryView from '../components/recovery-view';
 
 // Neutral blues/grey: traffic-light colours are reserved for the mood picker
@@ -14,12 +14,14 @@ const PRIORITY_COLORS: Record<Priority, string> = {
 };
 
 function TaskRow({ task, onPress, showCheckbox }: { task: Task; onPress: () => void; showCheckbox: boolean }) {
+  const router = useRouter();
   const label = deadlineLabel(task.deadline) ?? task.deadline;
   const days = daysUntil(task.deadline);
   const urgent = days !== null && days <= 1;
+  
 
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+       <Pressable style={styles.row} onPress={onPress} onLongPress={() => router.push({ pathname: '/add-task', params: { id: task.id } })} >
       {showCheckbox && (
         <View style={[styles.checkbox, task.completed && styles.checkboxChecked]}>
           {task.completed && <Text style={styles.checkmark}>✓</Text>}
@@ -82,6 +84,8 @@ export default function Home() {
   const [choosing, setChoosing] = useState(false);
   const [declined, setDeclined] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  
 
   // Reset the "nothing urgent" choices whenever the mode changes
   useEffect(() => {
@@ -91,6 +95,7 @@ export default function Home() {
   }, [mode]);
 
   const view = getModeView(tasks, mode);
+  const doneToday = getDoneToday(tasks);
   const chosen = chosenId ? tasks.find(t => t.id === chosenId && !t.completed) : undefined;
 
   const renderContent = () => {
@@ -108,7 +113,8 @@ export default function Home() {
           data={openTasks}
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
-            <TaskRow task={item} showCheckbox onPress={() => toggleTask(item.id)} />
+            <TaskRow task={item} showCheckbox onPress={() => toggleTask(item.id)}  />
+          
           )}
         />
       )}
@@ -145,7 +151,7 @@ export default function Home() {
           </View>
         );
 
-      case 'all':
+            case 'all':
         return (
           <FlatList
             data={view.tasks}
@@ -251,6 +257,24 @@ export default function Home() {
       <Text style={styles.modeLine}>{mode} mode</Text>
 
       {renderContent()}
+      
+
+      {doneToday.length > 0 && (
+        <View style={styles.doneSection}>
+          <Pressable onPress={() => setShowDone(prev => !prev)}>
+            <Text style={styles.linkText}>
+              {showDone ? 'Hide' : 'Show'} done today ({doneToday.length})
+            </Text>
+          </Pressable>
+          {showDone && (
+            <ScrollView style={styles.doneList}>
+              {doneToday.map(item => (
+                <TaskRow key={item.id} task={item} showCheckbox onPress={() => toggleTask(item.id)} />
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
 
       <Pressable style={styles.fab} onPress={() => router.push('/add-task')}>
         <Text style={styles.fabText}>+</Text>
@@ -285,4 +309,6 @@ const styles = StyleSheet.create({
   calmText: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 40 },
   fab: { position: 'absolute', bottom: 30, right: 30, width: 56, height: 56, borderRadius: 28, backgroundColor: '#4A90D9', justifyContent: 'center', alignItems: 'center', elevation: 4 },
   fabText: { color: 'white', fontSize: 28, lineHeight: 30 },
+  doneSection: { paddingBottom: 60 },
+  doneList: { maxHeight: 220 }, 
 });

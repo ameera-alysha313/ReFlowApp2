@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { collection, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, deleteField, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
 import { useAuth } from './auth-context';
 import { logEvent } from '../utils/log-event';
@@ -15,15 +15,19 @@ export type Task = {
   important: boolean;
   priority: Priority;
   createdAt?: number;
+  completedAt?: number;
 };
 
-type NewTask = Omit<Task, 'id' | 'completed' | 'createdAt'>;
+type NewTask = Omit<Task, 'id' | 'completed' | 'createdAt' | 'completedAt'>;
+
 
 type TasksContextType = {
   tasks: Task[];
   tags: string[];
   addTask: (task: NewTask) => void;
   toggleTask: (id: string) => void;
+  updateTask: (id: string, changes: Partial<NewTask>) => void;
+  deleteTask: (id: string) => void;
   addTag: (tag: string) => void;
 };
 
@@ -72,9 +76,28 @@ const toggleTask = (id: string) => {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
   const nowCompleted = !task.completed;
-  updateDoc(doc(db, 'users', uid, 'tasks', id), { completed: nowCompleted })
-    .then(() => logEvent(uid, nowCompleted ? 'task_completed' : 'task_uncompleted', { taskId: id }))
-    .catch(e => console.warn('Toggle failed', e));
+  updateDoc(doc(db, 'users', uid, 'tasks', id), {
+    completed: nowCompleted,
+    completedAt: nowCompleted ? Date.now() : deleteField(),
+  });
+};
+
+const updateTask = (id: string, changes: Partial<NewTask>) => {
+  if (!uid) return;
+  // undefined = "field was cleared", so actually remove it from Firestore
+  const clean = Object.fromEntries(
+    Object.entries(changes).map(([k, v]) => [k, v === undefined ? deleteField() : v])
+  );
+  updateDoc(doc(db, 'users', uid, 'tasks', id), clean)
+    .then(() => logEvent(uid, 'task_updated', { taskId: id }))
+    .catch(e => console.warn('Update failed', e));
+};
+
+const deleteTask = (id: string) => {
+  if (!uid) return;
+  deleteDoc(doc(db, 'users', uid, 'tasks', id))
+    .then(() => logEvent(uid, 'task_deleted', { taskId: id }))
+    .catch(e => console.warn('Delete failed', e));
 };
 
   const addTag = (tag: string) => {
@@ -84,7 +107,7 @@ const toggleTask = (id: string) => {
   };
 
   return (
-    <TasksContext.Provider value={{ tasks, tags, addTask, toggleTask, addTag }}>
+    <TasksContext.Provider value={{ tasks, tags, addTask, toggleTask, updateTask, deleteTask, addTag }}>
       {children}
     </TasksContext.Provider>
   );

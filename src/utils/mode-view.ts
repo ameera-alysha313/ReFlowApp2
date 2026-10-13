@@ -39,13 +39,18 @@ const byUrgency = (a: Task, b: Task) => {
   return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
 };
 
+
 // Highest priority first, then nearest deadline
 const byPriority = (a: Task, b: Task) =>
   PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || byUrgency(a, b);
+  const isToday = (ts?: number) => !!ts && new Date(ts).toDateString() === new Date().toDateString();
+  
+  export const getDoneToday = (tasks: Task[]) =>
+    tasks.filter(t => t.completed && isToday(t.completedAt));
 
   export type ModeView =
   | { kind: 'empty'; allDone: boolean }
-  | { kind: 'all'; tasks: Task[] }
+  | { kind: 'all'; tasks: Task[]}
   | { kind: 'due-soon'; tasks: Task[] }
   | { kind: 'single'; task: Task }
   | { kind: 'nothing-urgent'; available: Task[] }
@@ -57,9 +62,9 @@ export function getModeView(tasks: Task[], mode: Mode): ModeView {
 
   // High: everything, open tasks first by priority, completed at the bottom
   if (mode === 'High') {
-    const open = tasks.filter(t => !t.completed).sort(byPriority);
-    const done = tasks.filter(t => t.completed);
-    return { kind: 'all', tasks: [...open, ...done] };
+  const open = tasks.filter(t => !t.completed).sort(byPriority);
+  if (open.length === 0) return { kind: 'empty', allDone: true };
+  return { kind: 'all', tasks: open };
   }
 
   const open = tasks.filter(t => !t.completed);

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Modal, Pressable, Alert, AppState,
+  View, Text, StyleSheet, Modal, Pressable, Alert, AppState, FlatList,
   PanResponder, GestureResponderEvent,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useAuth } from '../context/auth-context';
 import { logEvent } from '../utils/log-event';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-
+import { useTasks } from '../context/task-context';
 
 const STROKE_WIDTH = 14;
 const RADIUS = 118;
@@ -30,9 +30,6 @@ const REEARN_SECONDS = TEST_MODE ? 5 : 10 * 60;
 const BREAK_SECONDS = TEST_MODE ? 15 : 5 * 60;
 const GRACE_SECONDS = TEST_MODE ? 15 : 2 * 60;
 const BACKGROUND_GRACE_SECONDS = TEST_MODE ? 10 : 5 * 60;
-
-// TODO: replace with the real task once Focus is linked to the tasks list
-const CURRENT_TASK_NAME = 'Write report';
 
 type Phase = 'idle' | 'focus' | 'break' | 'ready';
 type Confirm = 'none' | 'break' | 'end' | 'switch';
@@ -57,7 +54,12 @@ export default function Focus() {
   const bgAtRef = useRef<number | null>(null);
   const phaseRef = useRef<Phase>('idle');
   const endSessionRef = useRef<(reason: EndReason) => void>(() => {});
-
+  
+  const { tasks } = useTasks();
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const openTasks = tasks.filter(t => !t.completed);
+  const currentTask = openTasks.find(t => t.id === taskId);
 
   // Drag bookkeeping
   const canDragRef = useRef(false);
@@ -162,8 +164,9 @@ useEffect(() => {
       reason,
       plannedMinutes: sessionMinutes,
       focusedSeconds: sessionMinutes * 60 - secondsLeft,
+      taskId: currentTask?.id ?? null,
     });
-  resetSession();
+    resetSession();
   };
 
   const formatTime = (totalSeconds: number) => {
@@ -239,9 +242,11 @@ useEffect(() => {
     logEvent(user?.uid ?? null, 'focus_started', {
       sessionId: sessionIdRef.current,
       plannedMinutes: sessionMinutes,
+      taskId: currentTask?.id ?? null,
     });
     setPhase('focus');
   };
+
   const startBreak = () => {
     setBreakBanked(false);
     setFocusedSeconds(0);
@@ -252,9 +257,17 @@ useEffect(() => {
 
   const backToWork = () => setPhase('focus');
 
-  const switchTask = () => {
-    Alert.alert('Coming soon', 'Task switching isn\'t wired up yet.');
+  
+  const chooseTask = (id: string) => {
+    if (phase !== 'idle' && id !== taskId) {
+      logEvent(user?.uid ?? null, 'focus_task_switched', {
+        sessionId: sessionIdRef.current, from: taskId, to: id,
+      });
+    }
+    setTaskId(id);
+    setPickerOpen(false);
   };
+  
 
   const confirmCopy: Record<Exclude<Confirm, 'none'>, string> = {
     break: 'Take a break now?',
@@ -267,7 +280,7 @@ useEffect(() => {
     setConfirm('none');
     if (action === 'break') startBreak();
     else if (action === 'end') endSession('manual');
-    else if (action === 'switch') switchTask();
+    else if (action === 'switch') setTimeout(() => setPickerOpen(true), 250);
   };
 
   // ---- Derived display values ----
@@ -302,9 +315,13 @@ useEffect(() => {
       {phase === 'ready' && <Text style={styles.taskName}>Break over! Ready?</Text>}
       {(phase === 'idle' || phase === 'focus') && (
         <View style={styles.taskRow}>
-          <Text style={styles.taskName}>{CURRENT_TASK_NAME}</Text>
-          <Pressable onPress={() => setConfirm('switch')} hitSlop={12} style={styles.switchButton}>
-          <Text style={styles.switchButtonText}>Switch</Text>
+          <Text style={styles.taskName}>{currentTask ? currentTask.title : 'Pick a task'}</Text>
+          <Pressable
+            onPress={() => (phase === 'idle' ? setPickerOpen(true) : setConfirm('switch'))}
+            hitSlop={12}
+            style={styles.switchButton}
+          >
+            <Text style={styles.switchButtonText}>{currentTask ? 'Switch' : 'Pick'}</Text>
           </Pressable>
         </View>
       )}
@@ -425,6 +442,43 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
+    
+      <Modal
+        visible={pickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Pick a task</Text>
+            {openTasks.length === 0 ? (
+              <Text style={styles.pickerEmpty}>No open tasks. Add one from Home.</Text>
+            ) : (
+              <FlatList
+                style={styles.pickerList}
+                data={openTasks}
+                keyExtractor={item => item.id}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={[styles.pickerRow, item.id === taskId && styles.pickerRowSelected]}
+                    onPress={() => chooseTask(item.id)}
+                  >
+                    <Text style={styles.pickerTitle}>{item.title}</Text>
+                    {item.tag ? <Text style={styles.pickerMeta}>{item.tag}</Text> : null}
+                  </Pressable>
+                )}
+              />
+            )}
+            <Pressable
+              style={[styles.modalButton, styles.modalNo, { marginRight: 0, marginTop: 12 }]}
+              onPress={() => setPickerOpen(false)}
+            >
+              <Text style={styles.modalButtonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -466,4 +520,10 @@ switchButtonText: { fontSize: 14, color: '#4A90D9', fontWeight: '600' },
   modalYes: { backgroundColor: '#5B9BDB', marginLeft: 8 },
   modalButtonText: { fontSize: 16 },
   modalYesText: { fontSize: 16, color: 'white', fontWeight: '600' },
+  pickerList: { maxHeight: 280 },
+pickerRow: { paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
+pickerRowSelected: { backgroundColor: '#e3eefa', borderRadius: 8 },
+pickerTitle: { fontSize: 16 },
+pickerMeta: { fontSize: 12, color: '#888', marginTop: 2 },
+pickerEmpty: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 12 },
 });
