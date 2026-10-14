@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Modal, Pressable, Alert, AppState, FlatList,
+  View, Text, StyleSheet, Modal, Pressable, Alert, Platform,
   PanResponder, GestureResponderEvent,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useAuth } from '../context/auth-context';
 import { logEvent } from '../utils/log-event';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useTasks } from '../context/task-context';
 
 const STROKE_WIDTH = 14;
 const RADIUS = 118;
@@ -29,15 +27,19 @@ const EARN_SECONDS = TEST_MODE ? 10 : 20 * 60;
 const REEARN_SECONDS = TEST_MODE ? 5 : 10 * 60;
 const BREAK_SECONDS = TEST_MODE ? 15 : 5 * 60;
 const GRACE_SECONDS = TEST_MODE ? 15 : 2 * 60;
-const BACKGROUND_GRACE_SECONDS = TEST_MODE ? 10 : 5 * 60;
+
+// TODO: replace with the real task once Focus is linked to the tasks list
+const CURRENT_TASK_NAME = 'Write report';
 
 type Phase = 'idle' | 'focus' | 'break' | 'ready';
 type Confirm = 'none' | 'break' | 'end' | 'switch';
-type EndReason = 'completed' | 'manual' | 'grace_exceeded' | 'background_exceeded';
+type Kind = 'timer' | 'stopwatch';
 
 export default function Focus() {
+  const [kind, setKind] = useState<Kind>('timer');
   const [sessionMinutes, setSessionMinutes] = useState(25);
   const [secondsLeft, setSecondsLeft] = useState(sessionMinutes * 60);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0); // stopwatch only
   const [phase, setPhase] = useState<Phase>('idle');
   const [confirm, setConfirm] = useState<Confirm>('none');
 
@@ -47,19 +49,10 @@ export default function Focus() {
   const [hasTakenBreak, setHasTakenBreak] = useState(false);
   const [breakLeft, setBreakLeft] = useState(BREAK_SECONDS);
   const [graceLeft, setGraceLeft] = useState(GRACE_SECONDS);
-  
+
   const { user } = useAuth();
   const sessionIdRef = useRef<string | null>(null);
-  const lastTickRef = useRef(Date.now());
-  const bgAtRef = useRef<number | null>(null);
-  const phaseRef = useRef<Phase>('idle');
-  const endSessionRef = useRef<(reason: EndReason) => void>(() => {});
-  
-  const { tasks } = useTasks();
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const openTasks = tasks.filter(t => !t.completed);
-  const currentTask = openTasks.find(t => t.id === taskId);
+  const isStopwatch = kind === 'stopwatch';
 
   // Drag bookkeeping
   const canDragRef = useRef(false);
@@ -69,8 +62,8 @@ export default function Focus() {
   const dragStartRef = useRef({ x: 0, y: 0 });
 
   // ---- One ticker for every phase ----
-  // Counts real elapsed time instead of assuming 1 tick = 1 second, so the timer
-  // stays correct when the browser throttles a background tab.
+  // Counts real elapsed time instead of assuming 1 tick = 1 second, so it stays
+  // correct when the browser throttles a background tab.
   useEffect(() => {
     if (phase === 'idle') return;
     let last = Date.now();
@@ -80,7 +73,8 @@ export default function Focus() {
       if (whole < 1) return;
       last += whole * 1000;
       if (phase === 'focus') {
-        setSecondsLeft(prev => Math.max(prev - whole, 0));
+        if (kind === 'stopwatch') setElapsedSeconds(prev => prev + whole);
+        else setSecondsLeft(prev => Math.max(prev - whole, 0));
         setFocusedSeconds(prev => prev + whole);
       } else if (phase === 'break') {
         setBreakLeft(prev => Math.max(prev - whole, 0));
@@ -90,39 +84,15 @@ export default function Focus() {
     };
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [phase]);
-
-
-  // Background Grace Period
-  useEffect(() => {
-  const sub = AppState.addEventListener('change', state => {
-    if (state === 'active') {
-      const away = bgAtRef.current ? Date.now() - bgAtRef.current : 0;
-      bgAtRef.current = null;
-      if (phaseRef.current === 'focus' && away > BACKGROUND_GRACE_SECONDS * 1000) {
-        endSessionRef.current('background_exceeded'); // silent, no popup
-      }
-    } else if (bgAtRef.current === null) {
-      bgAtRef.current = Date.now();
-    }
-  });
-  return () => sub.remove();
-}, []);
-
-// Keep the screen on while a session is running so you can see the time left
-useEffect(() => {
-  if (phase === 'idle') return;
-  activateKeepAwakeAsync('focus');
-  return () => { deactivateKeepAwake('focus'); };
-}, [phase === 'idle']);
+  }, [phase, kind]);
 
   // ---- Transitions ----
   useEffect(() => {
-    if (phase === 'focus' && secondsLeft === 0) {
-      endSession('completed');;
+    if (phase === 'focus' && kind === 'timer' && secondsLeft === 0) {
+      endSession('completed');
       Alert.alert('Session complete', 'Nice work. You finished the whole session.');
     }
-  }, [phase, secondsLeft]);
+  }, [phase, kind, secondsLeft]);
 
   useEffect(() => {
     const threshold = hasTakenBreak ? REEARN_SECONDS : EARN_SECONDS;
@@ -140,8 +110,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (phase === 'ready' && graceLeft === 0) {
-      const focusedMinutes = Math.floor((sessionMinutes * 60 - secondsLeft) / 60);
-      endSession('grace_exceeded');;
+      const focusedMinutes = Math.floor(totalFocusedSeconds() / 60);
+      endSession('grace_exceeded');
       Alert.alert(
         'Session ended',
         `No worries. You focused for ${focusedMinutes} minute${focusedMinutes === 1 ? '' : 's'}. Start again whenever you're ready.`
@@ -150,10 +120,15 @@ useEffect(() => {
   }, [phase, graceLeft]);
 
   // ---- Helpers ----
+  // Actual time focused this session (timer: used up so far; stopwatch: elapsed)
+  const totalFocusedSeconds = () =>
+    kind === 'stopwatch' ? elapsedSeconds : sessionMinutes * 60 - secondsLeft;
+
   const resetSession = () => {
     setPhase('idle');
     setConfirm('none');
     setSecondsLeft(sessionMinutes * 60);
+    setElapsedSeconds(0);
     setFocusedSeconds(0);
     setBreakBanked(false);
     setHasTakenBreak(false);
@@ -161,14 +136,13 @@ useEffect(() => {
     setGraceLeft(GRACE_SECONDS);
   };
 
-
-  const endSession = (reason: EndReason) => {
+  const endSession = (reason: 'completed' | 'manual' | 'grace_exceeded' | 'finished') => {
     logEvent(user?.uid ?? null, 'focus_ended', {
       sessionId: sessionIdRef.current,
+      kind,
       reason,
-      plannedMinutes: sessionMinutes,
-      focusedSeconds: sessionMinutes * 60 - secondsLeft,
-      taskId: currentTask?.id ?? null,
+      plannedMinutes: kind === 'timer' ? sessionMinutes : null,
+      focusedSeconds: totalFocusedSeconds(),
     });
     resetSession();
   };
@@ -245,12 +219,11 @@ useEffect(() => {
     sessionIdRef.current = String(Date.now());
     logEvent(user?.uid ?? null, 'focus_started', {
       sessionId: sessionIdRef.current,
-      plannedMinutes: sessionMinutes,
-      taskId: currentTask?.id ?? null,
+      kind,
+      plannedMinutes: kind === 'timer' ? sessionMinutes : null,
     });
     setPhase('focus');
   };
-
   const startBreak = () => {
     setBreakBanked(false);
     setFocusedSeconds(0);
@@ -261,21 +234,13 @@ useEffect(() => {
 
   const backToWork = () => setPhase('focus');
 
-  
-  const chooseTask = (id: string) => {
-    if (phase !== 'idle' && id !== taskId) {
-      logEvent(user?.uid ?? null, 'focus_task_switched', {
-        sessionId: sessionIdRef.current, from: taskId, to: id,
-      });
-    }
-    setTaskId(id);
-    setPickerOpen(false);
+  const switchTask = () => {
+    Alert.alert('Coming soon', 'Task switching isn\'t wired up yet.');
   };
-  
 
   const confirmCopy: Record<Exclude<Confirm, 'none'>, string> = {
     break: 'Take a break now?',
-    end: 'End the session early?',
+    end: isStopwatch ? 'Finish this session?' : 'End the session early?',
     switch: 'Switch task?',
   };
 
@@ -283,49 +248,76 @@ useEffect(() => {
     const action = confirm;
     setConfirm('none');
     if (action === 'break') startBreak();
-    else if (action === 'end') endSession('manual');
-    else if (action === 'switch') setTimeout(() => setPickerOpen(true), 250);
+    else if (action === 'end') {
+      if (isStopwatch) {
+        const mins = Math.floor(elapsedSeconds / 60);
+        endSession('finished');
+        Alert.alert('Session finished', `Nice work. You focused for ${mins} minute${mins === 1 ? '' : 's'}.`);
+      } else {
+        endSession('manual');
+      }
+    } else if (action === 'switch') switchTask();
   };
 
   // ---- Derived display values ----
   const isAtDefault = secondsLeft === sessionMinutes * 60;
-  const canDrag = phase === 'idle' && isAtDefault;
+  const canDrag = phase === 'idle' && isAtDefault && kind === 'timer';
   canDragRef.current = canDrag;
-  phaseRef.current = phase;
-  endSessionRef.current = endSession;
   sessionMinutesRef.current = sessionMinutes;
 
   const onBreak = phase === 'break';
   const perLapSeconds = onBreak ? BREAK_SECONDS : MINUTES_PER_LAP * 60;
-  const ringSeconds = onBreak ? breakLeft : secondsLeft;
+  const mainSeconds = isStopwatch ? elapsedSeconds : secondsLeft; // stopwatch fills up, timer empties
+  const ringSeconds = onBreak ? breakLeft : mainSeconds;
   const firstLapProgress = Math.min(ringSeconds, perLapSeconds) / perLapSeconds;
   const secondLapProgress = Math.max(ringSeconds - perLapSeconds, 0) / perLapSeconds;
   const firstLapOffset = CIRCUMFERENCE * (1 - firstLapProgress);
   const secondLapOffset = CIRCUMFERENCE * (1 - secondLapProgress);
   const ringColor = onBreak ? '#7BC8A4' : phase === 'ready' ? '#9bbfe6' : '#4A90D9';
-  const centerText = formatTime(onBreak ? breakLeft : secondsLeft);
+  const centerText = formatTime(onBreak ? breakLeft : mainSeconds);
 
   const minutesLeft = secondsLeft / 60;
   const handleAngle = ((minutesLeft % MINUTES_PER_LAP) / MINUTES_PER_LAP) * 2 * Math.PI;
   const handleX = CENTER + RADIUS * Math.sin(handleAngle);
   const handleY = CENTER - RADIUS * Math.cos(handleAngle);
 
+  // Show the time in the browser tab title (web only), handy when working in other tabs
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    if (phase === 'idle') document.title = 'ReFlo';
+    else if (phase === 'ready') document.title = `Break over · ${formatTime(graceLeft)}`;
+    else document.title = `${centerText} · ${onBreak ? 'Break' : 'Focus'}`;
+  }, [phase, centerText, onBreak, graceLeft]);
+
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Focus Mode</Text>
+
+      {/* Timer / Stopwatch choice (only before starting) */}
+      {phase === 'idle' && (
+        <View style={styles.kindRow}>
+          {(['timer', 'stopwatch'] as Kind[]).map(k => (
+            <Pressable
+              key={k}
+              style={[styles.kindChip, kind === k && styles.kindChipSelected]}
+              onPress={() => setKind(k)}
+            >
+              <Text style={kind === k ? styles.kindTextSelected : styles.kindText}>
+                {k === 'timer' ? 'Timer' : 'Stopwatch'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {/* Label slot */}
       {phase === 'break' && <Text style={styles.taskName}>On a break</Text>}
       {phase === 'ready' && <Text style={styles.taskName}>Break over! Ready?</Text>}
       {(phase === 'idle' || phase === 'focus') && (
         <View style={styles.taskRow}>
-          <Text style={styles.taskName}>{currentTask ? currentTask.title : 'Pick a task'}</Text>
-          <Pressable
-            onPress={() => (phase === 'idle' ? setPickerOpen(true) : setConfirm('switch'))}
-            hitSlop={12}
-            style={styles.switchButton}
-          >
-            <Text style={styles.switchButtonText}>{currentTask ? 'Switch' : 'Pick'}</Text>
+          <Text style={styles.taskName}>{CURRENT_TASK_NAME}</Text>
+          <Pressable onPress={() => setConfirm('switch')} hitSlop={12} style={styles.switchButton}>
+            <Text style={styles.switchButtonText}>Switch</Text>
           </Pressable>
         </View>
       )}
@@ -361,7 +353,7 @@ useEffect(() => {
         <Text style={styles.timer} pointerEvents="none">{centerText}</Text>
       </View>
 
-      {/* Duration adjust (only before starting) */}
+      {/* Duration adjust (timer only, before starting) */}
       {canDrag && (
         <View style={styles.adjustRow}>
           <Pressable
@@ -380,6 +372,10 @@ useEffect(() => {
             <Text style={styles.adjustButtonText}>+</Text>
           </Pressable>
         </View>
+      )}
+
+      {phase === 'idle' && isStopwatch && (
+        <Text style={styles.hint}>Runs until you finish. No set length, no pressure.</Text>
       )}
 
       {/* Button slot */}
@@ -405,7 +401,7 @@ useEffect(() => {
               style={[styles.actionButton, styles.primary]}
               onPress={() => setConfirm('end')}
             >
-              <Text style={styles.primaryText}>End Session</Text>
+              <Text style={styles.primaryText}>{isStopwatch ? 'Finish' : 'End Session'}</Text>
             </Pressable>
           </>
         )}
@@ -446,55 +442,24 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
-    
-      <Modal
-        visible={pickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPickerOpen(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Pick a task</Text>
-            {openTasks.length === 0 ? (
-              <Text style={styles.pickerEmpty}>No open tasks. Add one from Home.</Text>
-            ) : (
-              <FlatList
-                style={styles.pickerList}
-                data={openTasks}
-                keyExtractor={item => item.id}
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={[styles.pickerRow, item.id === taskId && styles.pickerRowSelected]}
-                    onPress={() => chooseTask(item.id)}
-                  >
-                    <Text style={styles.pickerTitle}>{item.title}</Text>
-                    {item.tag ? <Text style={styles.pickerMeta}>{item.tag}</Text> : null}
-                  </Pressable>
-                )}
-              />
-            )}
-            <Pressable
-              style={[styles.modalButton, styles.modalNo, { marginRight: 0, marginTop: 12 }]}
-              onPress={() => setPickerOpen(false)}
-            >
-              <Text style={styles.modalButtonText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
+  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 12 },
+  kindRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  kindChip: { borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 6, paddingHorizontal: 16 },
+  kindChipSelected: { backgroundColor: '#4A90D9', borderColor: '#4A90D9' },
+  kindText: { fontSize: 14, color: '#444' },
+  kindTextSelected: { fontSize: 14, color: 'white', fontWeight: '600' },
+  hint: { fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 16 },
   taskRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   taskName: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
   switchButton: { marginLeft: 12, marginBottom: 10, paddingVertical: 4, paddingHorizontal: 12,
-  borderRadius: 14, backgroundColor: '#e3eefa' },
-switchButtonText: { fontSize: 14, color: '#4A90D9', fontWeight: '600' },
+    borderRadius: 14, backgroundColor: '#e3eefa' },
+  switchButtonText: { fontSize: 14, color: '#4A90D9', fontWeight: '600' },
   ringWrapper: { width: RING_SIZE, height: RING_SIZE, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   timer: { position: 'absolute', fontSize: 48, fontWeight: '200' },
   adjustRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
@@ -524,10 +489,4 @@ switchButtonText: { fontSize: 14, color: '#4A90D9', fontWeight: '600' },
   modalYes: { backgroundColor: '#5B9BDB', marginLeft: 8 },
   modalButtonText: { fontSize: 16 },
   modalYesText: { fontSize: 16, color: 'white', fontWeight: '600' },
-  pickerList: { maxHeight: 280 },
-pickerRow: { paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
-pickerRowSelected: { backgroundColor: '#e3eefa', borderRadius: 8 },
-pickerTitle: { fontSize: 16 },
-pickerMeta: { fontSize: 12, color: '#888', marginTop: 2 },
-pickerEmpty: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 12 },
 });
