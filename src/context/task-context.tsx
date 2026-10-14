@@ -41,7 +41,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tags, setTags] = useState<string[]>(PRESET_TAGS);
 
-  // Live-listen to this user's tasks; reset everything on logout
+  // Live-listen to user's tasks; reset everything on logout
   useEffect(() => {
     if (!uid) {
       setTasks([]);

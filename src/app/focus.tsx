@@ -69,22 +69,26 @@ export default function Focus() {
   const dragStartRef = useRef({ x: 0, y: 0 });
 
   // ---- One ticker for every phase ----
+  // Counts real elapsed time instead of assuming 1 tick = 1 second, so the timer
+  // stays correct when the browser throttles a background tab.
   useEffect(() => {
     if (phase === 'idle') return;
-    lastTickRef.current = Date.now();
-    const id = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - lastTickRef.current) / 1000);
-      if (elapsed < 1) return;
-      lastTickRef.current += elapsed * 1000;
+    let last = Date.now();
+    const tick = () => {
+      const now = Date.now();
+      const whole = Math.floor((now - last) / 1000);
+      if (whole < 1) return;
+      last += whole * 1000;
       if (phase === 'focus') {
-        setSecondsLeft(prev => Math.max(prev - elapsed, 0));
-        setFocusedSeconds(prev => prev + elapsed);
+        setSecondsLeft(prev => Math.max(prev - whole, 0));
+        setFocusedSeconds(prev => prev + whole);
       } else if (phase === 'break') {
-        setBreakLeft(prev => Math.max(prev - elapsed, 0));
+        setBreakLeft(prev => Math.max(prev - whole, 0));
       } else if (phase === 'ready') {
-        setGraceLeft(prev => Math.max(prev - elapsed, 0));
+        setGraceLeft(prev => Math.max(prev - whole, 0));
       }
-    }, 1000);
+    };
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [phase]);
 
