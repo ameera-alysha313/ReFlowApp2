@@ -1,12 +1,15 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
+import { AppState } from 'react-native';
 
 export type EventType =
   | 'task_created' | 'task_completed' | 'task_uncompleted'
   | 'task_updated' | 'task_deleted'
   | 'task_postponed' | 'task_abandoned'
   | 'mode_switched'
-  | 'focus_started' | 'focus_ended' | 'focus_task_switched';
+  | 'focus_started' | 'focus_ended' | 'focus_task_switched'
+  | 'reflection_note'
+  | 'app_state';
 
 export function logEvent(
   uid: string | null,

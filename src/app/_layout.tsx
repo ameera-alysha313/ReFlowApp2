@@ -17,6 +17,7 @@ function AppTabs() {
         <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
         <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
         <Tabs.Screen name="add-task" options={{ href: null }} />
+        <Tabs.Screen name="history" options={{ href: null }} />
       </Tabs>
 
       {loading && (

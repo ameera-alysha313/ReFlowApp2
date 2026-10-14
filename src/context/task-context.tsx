@@ -79,7 +79,9 @@ const toggleTask = (id: string) => {
   updateDoc(doc(db, 'users', uid, 'tasks', id), {
     completed: nowCompleted,
     completedAt: nowCompleted ? Date.now() : deleteField(),
-  });
+  })
+    .then(() => logEvent(uid, nowCompleted ? 'task_completed' : 'task_uncompleted', { taskId: id }))
+    .catch(e => console.warn('Toggle failed', e));
 };
 
 const updateTask = (id: string, changes: Partial<NewTask>) => {
