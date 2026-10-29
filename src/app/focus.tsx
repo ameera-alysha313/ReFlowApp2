@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import {
-  View, Text, StyleSheet, Modal, Pressable, Alert, Platform,
-  PanResponder, GestureResponderEvent,
-} from 'react-native';
+import {FlatList, View, Text, StyleSheet, Modal, Pressable, Alert, Platform,
+  PanResponder, GestureResponderEvent} from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useAuth } from '../context/auth-context';
 import { logEvent } from '../utils/log-event';
+import { useTasks } from '../context/task-context';
 
 const STROKE_WIDTH = 14;
 const RADIUS = 118;
@@ -22,14 +21,13 @@ const MAX_MINUTES = 120;
 const STEP_MINUTES = 5;
 
 // ---- Break settings ----
-const TEST_MODE = true; // set to false for real values
+const TEST_MODE = false; // set to false for real values
 const EARN_SECONDS = TEST_MODE ? 10 : 20 * 60;
 const REEARN_SECONDS = TEST_MODE ? 5 : 10 * 60;
 const BREAK_SECONDS = TEST_MODE ? 15 : 5 * 60;
 const GRACE_SECONDS = TEST_MODE ? 15 : 2 * 60;
 
-// TODO: replace with the real task once Focus is linked to the tasks list
-const CURRENT_TASK_NAME = 'Write report';
+
 
 type Phase = 'idle' | 'focus' | 'break' | 'ready';
 type Confirm = 'none' | 'break' | 'end' | 'switch';
@@ -53,6 +51,12 @@ export default function Focus() {
   const { user } = useAuth();
   const sessionIdRef = useRef<string | null>(null);
   const isStopwatch = kind === 'stopwatch';
+
+  const { tasks } = useTasks();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const openTasks = tasks.filter(t => !t.completed);
+  const currentTask = openTasks.find(t => t.id === currentTaskId); // falls back to none if it gets ticked off
 
   // Drag bookkeeping
   const canDragRef = useRef(false);
@@ -140,6 +144,7 @@ export default function Focus() {
     logEvent(user?.uid ?? null, 'focus_ended', {
       sessionId: sessionIdRef.current,
       kind,
+      taskId: currentTaskId,
       reason,
       plannedMinutes: kind === 'timer' ? sessionMinutes : null,
       focusedSeconds: totalFocusedSeconds(),
@@ -220,6 +225,7 @@ export default function Focus() {
     logEvent(user?.uid ?? null, 'focus_started', {
       sessionId: sessionIdRef.current,
       kind,
+      taskId: currentTaskId,
       plannedMinutes: kind === 'timer' ? sessionMinutes : null,
     });
     setPhase('focus');
@@ -234,8 +240,22 @@ export default function Focus() {
 
   const backToWork = () => setPhase('focus');
 
-  const switchTask = () => {
-    Alert.alert('Coming soon', 'Task switching isn\'t wired up yet.');
+  const handleSwitchPress = () => {
+    // Nothing is running yet, so no need to ask "are you sure?"
+    if (phase === 'idle') setPickerOpen(true);
+    else setConfirm('switch');
+  };
+
+  const chooseTask = (taskId: string | null) => {
+    if (phase === 'focus' && taskId !== currentTaskId) {
+      logEvent(user?.uid ?? null, 'focus_task_switched', {
+        sessionId: sessionIdRef.current,
+        fromTaskId: currentTaskId,
+        toTaskId: taskId,
+      });
+    }
+    setCurrentTaskId(taskId);
+    setPickerOpen(false);
   };
 
   const confirmCopy: Record<Exclude<Confirm, 'none'>, string> = {
@@ -256,7 +276,10 @@ export default function Focus() {
       } else {
         endSession('manual');
       }
-    } else if (action === 'switch') switchTask();
+    } else if (action === 'switch') {
+      // Small delay so the Yes/No popup finishes closing before the picker opens (iOS can't stack modals)
+      setTimeout(() => setPickerOpen(true), 250);
+    }
   };
 
   // ---- Derived display values ----
@@ -315,9 +338,11 @@ export default function Focus() {
       {phase === 'ready' && <Text style={styles.taskName}>Break over! Ready?</Text>}
       {(phase === 'idle' || phase === 'focus') && (
         <View style={styles.taskRow}>
-          <Text style={styles.taskName}>{CURRENT_TASK_NAME}</Text>
-          <Pressable onPress={() => setConfirm('switch')} hitSlop={12} style={styles.switchButton}>
-            <Text style={styles.switchButtonText}>Switch</Text>
+          <Text style={[styles.taskName, { flexShrink: 1 }]} numberOfLines={2}>
+            {currentTask ? currentTask.title : 'No task chosen'}
+          </Text>
+          <Pressable onPress={handleSwitchPress} hitSlop={12} style={styles.switchButton}>
+            <Text style={styles.switchButtonText}>{currentTask ? 'Switch' : 'Choose'}</Text>
           </Pressable>
         </View>
       )}
@@ -442,6 +467,44 @@ export default function Focus() {
           </View>
         </View>
       </Modal>
+            {/* Task picker */}
+      <Modal
+        visible={pickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Pick a task</Text>
+            {openTasks.length === 0 ? (
+              <Text style={styles.pickerEmpty}>
+                No open tasks. Add one from Home, or just focus without one.
+              </Text>
+            ) : (
+              <FlatList
+                data={openTasks}
+                keyExtractor={t => t.id}
+                style={{ maxHeight: 280 }}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={[styles.pickerRow, item.id === currentTaskId && styles.pickerRowSelected]}
+                    onPress={() => chooseTask(item.id)}
+                  >
+                    <Text style={styles.pickerText}>{item.title}</Text>
+                  </Pressable>
+                )}
+              />
+            )}
+            <Pressable onPress={() => chooseTask(null)}>
+              <Text style={styles.pickerLink}>Focus without a task</Text>
+            </Pressable>
+            <Pressable onPress={() => setPickerOpen(false)}>
+              <Text style={styles.pickerLink}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -489,4 +552,9 @@ const styles = StyleSheet.create({
   modalYes: { backgroundColor: '#5B9BDB', marginLeft: 8 },
   modalButtonText: { fontSize: 16 },
   modalYesText: { fontSize: 16, color: 'white', fontWeight: '600' },
+    pickerRow: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10 },
+  pickerRowSelected: { backgroundColor: '#e3eefa' },
+  pickerText: { fontSize: 16 },
+  pickerEmpty: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 12 },
+  pickerLink: { color: '#4A90D9', textAlign: 'center', marginTop: 12, fontSize: 15 },
 });

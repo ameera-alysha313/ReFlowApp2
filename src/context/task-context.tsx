@@ -86,12 +86,17 @@ const toggleTask = (id: string) => {
 
 const updateTask = (id: string, changes: Partial<NewTask>) => {
   if (!uid) return;
+  const before = tasks.find(t => t.id === id);
   // undefined = "field was cleared", so actually remove it from Firestore
   const clean = Object.fromEntries(
     Object.entries(changes).map(([k, v]) => [k, v === undefined ? deleteField() : v])
   );
   updateDoc(doc(db, 'users', uid, 'tasks', id), clean)
-    .then(() => logEvent(uid, 'task_updated', { taskId: id }))
+    .then(() => logEvent(uid, 'task_updated', {
+      taskId: id,
+      oldDeadline: before?.deadline ?? null,
+      newDeadline: 'deadline' in changes ? (changes.deadline ?? null) : (before?.deadline ?? null),
+    }))
     .catch(e => console.warn('Update failed', e));
 };
 

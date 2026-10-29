@@ -5,6 +5,8 @@ import { useTasks, Task, Priority } from '../context/task-context';
 import { useMode } from '../context/mode-context';
 import {getDoneToday, getModeView, deadlineLabel, daysUntil, MEDIUM_WINDOW_DAYS } from '../utils/mode-view';
 import RecoveryView from '../components/recovery-view';
+import { useAuth } from '../context/auth-context';
+import { logEvent } from '../utils/log-event';
 
 // Neutral blues/grey: traffic-light colours are reserved for the mood picker
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -78,6 +80,7 @@ function SingleTask({
 export default function Home() {
   const { tasks, toggleTask } = useTasks();
   const { mode, setMode } = useMode();
+  const { user } = useAuth();
   const router = useRouter();
 
   const [chosenId, setChosenId] = useState<string | null>(null);
@@ -130,6 +133,7 @@ export default function Home() {
           onDone={() => toggleTask(chosen.id)}
           secondaryLabel="Pick a different task"
           onSecondary={() => {
+            logEvent(user?.uid ?? null, 'task_passed_over', { taskId: chosen.id, mode });
             setChosenId(null);
             setChoosing(true);
           }}
