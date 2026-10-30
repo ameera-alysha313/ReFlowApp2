@@ -26,13 +26,15 @@ export default function ModeSwitch() {
           <Text style={styles.buttonText}>{label}</Text>
         </TouchableOpacity>
       ))}
-      {/* TEMPORARY: Recovery is meant to trigger automatically. Remove once auto-trigger is built. */}
-      <TouchableOpacity
-        style={[styles.testButton, mode === 'Recovery' && styles.selectedButton]}
-        onPress={() => setMode('Recovery')}
-      >
-        <Text style={styles.testButtonText}>Recovery (test only)</Text>
-      </TouchableOpacity>
+
+      {__DEV__ && (
+        <TouchableOpacity
+          style={[styles.testButton, mode === 'Recovery' && styles.selectedButton]}
+          onPress={() => setMode('Recovery')}
+        >
+          <Text style={styles.testButtonText}>Recovery (test only)</Text>
+        </TouchableOpacity>
+     )}
 
       <Text style={styles.currentMode}>Current mode: {mode}</Text>
     </View>

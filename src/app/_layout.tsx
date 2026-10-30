@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from '../context/auth-context';
 import { TasksProvider } from '../context/task-context';
 import { ModeProvider } from '../context/mode-context';
 import AuthScreen from '../components/auth-screen';
+import { ScheduleProvider } from '../context/schedule-context';
+import Reengagement from '../components/reengagement';
 
 const tabIcon = (source: ImageSourcePropType) =>
   ({ color, size }: { color: ColorValue; size: number }) => (
@@ -25,7 +27,8 @@ function AppTabs() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Tabs screenOptions={{ headerShown: false }}>
+    <Reengagement />
+    <Tabs screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: tabIcon(require('../../assets/icons/home.png')) }} />
       <Tabs.Screen name="focus" options={{ title: 'Focus', tabBarIcon: tabIcon(require('../../assets/icons/focus.png')) }} />
       <Tabs.Screen name="mode-switch" options={{ title: 'Mode', tabBarIcon: tabIcon(require('../../assets/icons/mode.png')) }} />
@@ -50,7 +53,9 @@ export default function Layout() {
     <AuthProvider>
       <TasksProvider>
         <ModeProvider>
-          <AppTabs />
+          <ScheduleProvider>
+            <AppTabs />
+          </ScheduleProvider>
         </ModeProvider>
       </TasksProvider>
     </AuthProvider>
@@ -60,3 +65,4 @@ export default function Layout() {
 const styles = StyleSheet.create({
   loading: { flex: 1, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' },
 });
+
