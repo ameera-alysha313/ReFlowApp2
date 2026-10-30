@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import {
   onAuthStateChanged,
-  signInAnonymously,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -15,7 +14,6 @@ type AuthContextType = {
   isGuest: boolean;
   signUp: (email: string, password: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  continueAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -63,17 +61,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithEmailAndPassword(auth, email, password);
   };
 
-  const continueAsGuest = async () => {
-    await signInAnonymously(auth);
-  };
-
   const signOut = async () => {
     await firebaseSignOut(auth);
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, isGuest: user?.isAnonymous ?? false, signUp, signIn, continueAsGuest, signOut }}
+      value={{ user, loading, isGuest: user?.isAnonymous ?? false, signUp, signIn, signOut }}
     >
       {children}
     </AuthContext.Provider>

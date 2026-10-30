@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, Pressable, ActivityIndicator, Scroll
 import { useAuth, friendlyError } from '../context/auth-context';
 
 export default function AuthScreen() {
-  const { signIn, signUp, continueAsGuest } = useAuth();
+  const { signIn, signUp} = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,18 +20,6 @@ export default function AuthScreen() {
     try {
       if (isSignUp) await signUp(email.trim(), password);
       else await signIn(email.trim(), password);
-    } catch (e) {
-      setError(friendlyError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleGuest = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      await continueAsGuest();
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -80,10 +68,6 @@ export default function AuthScreen() {
         <Text style={styles.link}>
           {isSignUp ? 'Already have an account? Log in' : 'No account yet? Sign up'}
         </Text>
-      </Pressable>
-
-      <Pressable onPress={handleGuest} disabled={busy}>
-        <Text style={styles.guestLink}>Continue as guest</Text>
       </Pressable>
     </ScrollView>
   );

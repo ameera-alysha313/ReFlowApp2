@@ -5,18 +5,10 @@ export default function Settings() {
   const { user, isGuest, signOut } = useAuth();
 
   const handleLogout = () => {
-    if (isGuest) {
-      Alert.alert(
-        'Log out of guest account?',
-        'Guest tasks are tied to this device and can\'t be recovered after you log out.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Log out', style: 'destructive', onPress: signOut },
-        ]
-      );
-    } else {
-      signOut();
-    }
+    Alert.alert('Log out?', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out', style: 'destructive', onPress: () => signOut() },
+    ]);
   };
 
   return (
