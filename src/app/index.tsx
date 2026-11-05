@@ -63,7 +63,7 @@ function SingleTask({ task, intro, onDone, secondaryLabel, onSecondary }: {
   const handleBreakDown = async () => {
     setLoading(true);
     const result = await breakDownTask(task, mode);
-    updateTask(task.id, { subtasks: result.subtasks });
+    updateTask(task.id, { subtasks: result.subtasks, friction: result.friction, stakes: result.stakes });
     logEvent(user?.uid ?? null, 'task_broken_down', {
       taskId: task.id, source: result.source, count: result.subtasks.length, mode,
     });
@@ -179,6 +179,29 @@ export default function Home() {
             setChosenId(null);
             setChoosing(true);
           }}
+        />
+      );
+    }
+
+    // Low mode: the recommender may surface a heavy task before its due date
+    if (mode === 'Low' && rec) {
+      if (declined) {
+        return (
+          <>
+            <Text style={styles.calmText}>That's okay. It will be here when you're ready.</Text>
+            <Pressable onPress={() => setDeclined(false)}>
+              <Text style={styles.linkText}>Show it again</Text>
+            </Pressable>
+          </>
+        );
+      }
+      return (
+        <SingleTask
+          task={rec.task}
+          intro={rec.reason}
+          onDone={() => toggleTask(rec.task.id)}
+          secondaryLabel="Not now"
+          onSecondary={() => setDeclined(true)}
         />
       );
     }

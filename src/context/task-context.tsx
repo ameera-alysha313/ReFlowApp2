@@ -3,6 +3,7 @@ import { collection, addDoc, updateDoc, deleteDoc, deleteField, doc, onSnapshot 
 import { db } from '../../config/firebaseConfig';
 import { useAuth } from './auth-context';
 import { logEvent } from '../utils/log-event';
+import { breakDownTask } from '../utils/task-breakdown';
 
 export type Priority = 'High' | 'Medium' | 'Low';
 
@@ -19,6 +20,8 @@ export type Task = {
   createdAt?: number;
   completedAt?: number;
   subtasks?: Subtask[];
+  friction?: number;
+  stakes?: number;
 };
 
 type NewTask = Omit<Task, 'id' | 'completed' | 'createdAt' | 'completedAt'>;
@@ -67,9 +70,24 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   addDoc(collection(db, 'users', uid, 'tasks'), {
     ...task, completed: false, createdAt: Date.now(),
   })
-    .then(ref => logEvent(uid, 'task_created', {
+   .then(ref => {
+    logEvent(uid, 'task_created', {
       taskId: ref.id, tag: task.tag, priority: task.priority, hasDeadline: !!task.deadline,
-    }))
+    });
+    // Background breakdown + difficulty estimate, so it's ready when the task is opened
+    breakDownTask({ ...task, id: ref.id, completed: false } as Task, 'Medium').then(r => {
+      if (r.source === 'generic') return; // leave empty so the button can retry later
+      updateDoc(doc(db, 'users', uid, 'tasks', ref.id), {
+        subtasks: r.subtasks,
+        ...(r.friction !== undefined ? { friction: r.friction } : {}),
+        ...(r.stakes !== undefined ? { stakes: r.stakes } : {}),
+      });
+      logEvent(uid, 'task_broken_down', {
+        taskId: ref.id, source: r.source, count: r.subtasks.length,
+        mode: 'Medium', model: r.model ?? null, ms: r.ms, auto: true,
+      });
+    });
+  })
     .catch(e => console.warn('Add task failed', e));
 };
 
