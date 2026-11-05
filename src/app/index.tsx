@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import {FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import { useState, useEffect, useMemo} from 'react';
+import {ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTasks, Task, Priority } from '../context/task-context';
 import { useMode } from '../context/mode-context';
@@ -7,6 +7,10 @@ import {getDoneToday, getModeView, deadlineLabel, daysUntil, MEDIUM_WINDOW_DAYS 
 import RecoveryView from '../components/recovery-view';
 import { useAuth } from '../context/auth-context';
 import { logEvent } from '../utils/log-event';
+import { breakDownTask } from '../utils/task-breakdown';
+import { useEvents } from '../utils/use-events';
+import { startOfDay } from '../utils/analytics-summary';
+import { computeFrictionMap, recommendTask } from '../utils/recommend-task';
 
 // Neutral blues/grey: traffic-light colours are reserved for the mood picker
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -45,33 +49,64 @@ function TaskRow({ task, onPress, showCheckbox }: { task: Task; onPress: () => v
   );
 }
 
-function SingleTask({
-  task,
-  intro,
-  onDone,
-  secondaryLabel,
-  onSecondary,
-}: {
-  task: Task;
-  intro: string;
-  onDone: () => void;
-  secondaryLabel?: string;
-  onSecondary?: () => void;
+function SingleTask({ task, intro, onDone, secondaryLabel, onSecondary }: {
+  task: Task; intro: string; onDone: () => void;
+  secondaryLabel?: string; onSecondary?: () => void;
 }) {
+  const { updateTask } = useTasks();
+  const { mode } = useMode();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
   const label = deadlineLabel(task.deadline) ?? task.deadline;
+  const subtasks = task.subtasks ?? [];
+
+  const handleBreakDown = async () => {
+    setLoading(true);
+    const result = await breakDownTask(task, mode);
+    updateTask(task.id, { subtasks: result.subtasks });
+    logEvent(user?.uid ?? null, 'task_broken_down', {
+      taskId: task.id, source: result.source, count: result.subtasks.length, mode,
+    });
+    setLoading(false);
+  };
+
+  const toggleSub = (sid: string) =>
+    updateTask(task.id, {
+      subtasks: subtasks.map(s => (s.id === sid ? { ...s, done: !s.done } : s)),
+    });
+
+  const nextId = subtasks.find(s => !s.done)?.id;
+
   return (
     <View style={styles.card}>
       <Text style={styles.cardIntro}>{intro}</Text>
       <Text style={styles.cardTitle}>{task.title}</Text>
-      <Text style={styles.cardMeta}>{[task.tag, label].filter(Boolean).join('  ·  ')}</Text>
-      {/* TODO: AI-generated subtasks / simpler steps go here */}
-      <Pressable style={styles.primaryButton} onPress={onDone}>
+      <Text style={styles.cardMeta}>{[task.tag, label].filter(Boolean).join(' · ')}</Text>
+
+      {subtasks.length === 0 ? (
+        <Pressable style={styles.secondaryButton} onPress={handleBreakDown} disabled={loading}>
+          {loading ? <ActivityIndicator /> : <Text style={styles.secondaryButtonText}>Break it into small steps</Text>}
+        </Pressable>
+      ) : (
+        <View style={{ marginBottom: 16 }}>
+          {subtasks.map(s => (
+            <Pressable key={s.id} style={styles.row} onPress={() => toggleSub(s.id)}>
+              <View style={[styles.checkbox, s.done && styles.checkboxChecked]}>
+                {s.done && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={[styles.taskText, s.id === nextId && { fontWeight: '700' }, s.done && { opacity: 0.4 }]}>
+                {s.title}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      <Pressable style={[styles.primaryButton, { marginTop: 10 }]} onPress={onDone}>
         <Text style={styles.primaryButtonText}>Mark as done</Text>
       </Pressable>
       {secondaryLabel ? (
-        <Pressable onPress={onSecondary}>
-          <Text style={styles.linkText}>{secondaryLabel}</Text>
-        </Pressable>
+        <Pressable onPress={onSecondary}><Text style={styles.linkText}>{secondaryLabel}</Text></Pressable>
       ) : null}
     </View>
   );
@@ -100,30 +135,37 @@ export default function Home() {
   const view = getModeView(tasks, mode);
   const doneToday = getDoneToday(tasks);
   const chosen = chosenId ? tasks.find(t => t.id === chosenId && !t.completed) : undefined;
+  const events = useEvents(startOfDay(-14));
+  const friction = useMemo(() => computeFrictionMap(tasks, events), [tasks, events]);
+  const rec = useMemo(() => recommendTask(tasks, mode, friction), [tasks, mode, friction]);
+
+  useEffect(() => {
+    if (rec) logEvent(user?.uid ?? null, 'recommendation_shown', { taskId: rec.task.id, path: rec.path, mode });
+  }, [rec?.task.id, mode]);
 
   const renderContent = () => {
 
- if (mode === 'Recovery') {
-  const openTasks = tasks.filter(t => !t.completed);
-  return (
-    <>
-      <RecoveryView onFeelingBetter={() => setMode('Low')} />
-      <Pressable onPress={() => setShowTasks(prev => !prev)}>
-        <Text style={styles.linkText}>{showTasks ? 'Hide my tasks' : 'Look at my tasks'}</Text>
-      </Pressable>
-      {showTasks && (
-        <FlatList
-          data={openTasks}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <TaskRow task={item} showCheckbox onPress={() => toggleTask(item.id)}  />
-          
-          )}
-        />
-      )}
-    </>
-  );
-}   
+  if (mode === 'Recovery') {
+    const openTasks = tasks.filter(t => !t.completed);
+    return (
+      <>
+        <RecoveryView onFeelingBetter={() => setMode('Low')} />
+        <Pressable onPress={() => setShowTasks(prev => !prev)}>
+          <Text style={styles.linkText}>{showTasks ? 'Hide my tasks' : 'Look at my tasks'}</Text>
+        </Pressable>
+        {showTasks && (
+          <FlatList
+            data={openTasks}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <TaskRow task={item} showCheckbox onPress={() => toggleTask(item.id)}  />
+            
+            )}
+          />
+        )}
+      </>
+    );
+  }   
     // A task the user picked from the "nothing urgent" list
     if (mode !== 'High' && chosen) {
       return (
@@ -169,6 +211,19 @@ export default function Home() {
       case 'due-soon':
         return (
           <>
+          {rec && (
+              <Pressable
+                style={styles.recBanner}
+                onPress={() => {
+                  logEvent(user?.uid ?? null, 'recommendation_accepted', { taskId: rec.task.id, path: rec.path, mode });
+                  setChosenId(rec.task.id);
+                }}
+              >
+                <Text style={styles.recLabel}>Suggested start</Text>
+                <Text style={styles.recTitle}>{rec.task.title}</Text>
+                <Text style={styles.recReason}>{rec.reason}</Text>
+              </Pressable>
+            )}
             <Text style={styles.sectionTitle}>Coming up</Text>
             <Text style={styles.sectionHint}>
               Due in the next {MEDIUM_WINDOW_DAYS} days. Starting early leaves you room to breathe.
@@ -183,14 +238,16 @@ export default function Home() {
           </>
         );
 
-      case 'single':
+      case 'single': {
+        const t = rec?.task ?? view.task;
         return (
           <SingleTask
-            task={view.task}
-            intro="Here's one thing to start with"
-            onDone={() => toggleTask(view.task.id)}
+            task={t}
+            intro={rec?.reason ?? "Here's one thing to start with"}
+            onDone={() => toggleTask(t.id)}
           />
         );
+      }
 
       case 'nothing-urgent':
         if (choosing) {
@@ -315,4 +372,8 @@ const styles = StyleSheet.create({
   fabText: { color: 'white', fontSize: 28, lineHeight: 30 },
   doneSection: { paddingBottom: 60 },
   doneList: { maxHeight: 220 }, 
+  recBanner: { backgroundColor: '#e3eefa', borderRadius: 12, padding: 16, marginBottom: 16 },
+  recLabel: { fontSize: 12, color: '#1F5FA8', fontWeight: '700', marginBottom: 4 },
+  recTitle: { fontSize: 18, fontWeight: '600' },
+  recReason: { fontSize: 13, color: '#44566b', marginTop: 4 },
 });

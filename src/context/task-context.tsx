@@ -6,6 +6,8 @@ import { logEvent } from '../utils/log-event';
 
 export type Priority = 'High' | 'Medium' | 'Low';
 
+export type Subtask = { id: string; title: string; done: boolean };
+
 export type Task = {
   id: string;
   title: string;
@@ -16,10 +18,10 @@ export type Task = {
   priority: Priority;
   createdAt?: number;
   completedAt?: number;
+  subtasks?: Subtask[];
 };
 
 type NewTask = Omit<Task, 'id' | 'completed' | 'createdAt' | 'completedAt'>;
-
 
 type TasksContextType = {
   tasks: Task[];

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Alert, View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView } from 'react-native';
+import { Alert, View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTasks, Priority } from '../context/task-context';
 import { suggestPriority } from '../utils/suggest-priority';
@@ -55,13 +55,21 @@ const handleSubmit = () => {
 
 const handleDelete = () => {
   if (!editing) return;
+
+  const doDelete = () => {
+    deleteTask(editing.id);
+    router.back();
+  };
+
+  // Alert.alert doesn't work on web, so use the browser's confirm box there
+  if (Platform.OS === 'web') {
+    if (window.confirm("Delete this task? This can't be undone.")) doDelete();
+    return;
+  }
+
   Alert.alert('Delete this task?', "This can't be undone.", [
     { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Delete',
-      style: 'destructive',
-      onPress: () => { deleteTask(editing.id); router.back(); },
-    },
+    { text: 'Delete', style: 'destructive', onPress: () => { deleteTask(editing.id); router.back(); }, },
   ]);
 };
 

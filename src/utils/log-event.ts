@@ -6,6 +6,8 @@ export type EventType =
   | 'task_created' | 'task_completed' | 'task_uncompleted'
   | 'task_updated' | 'task_deleted'
   | 'task_postponed' | 'task_abandoned'
+  | 'task_broken_down'
+  | 'recommendation_shown' | 'recommendation_accepted'
   | 'mode_switched'
   | 'schedule_set'
   | 'focus_started' | 'focus_ended' | 'focus_task_switched'
