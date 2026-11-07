@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, Button, Alert, Pressable, Modal, Platform } from 'react-native';
+import { View, Text, StyleSheet, Button, Alert, Pressable, Modal, Platform, ScrollView } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../context/auth-context';
 import { useSchedule } from '../context/schedule-context';
+import TagManager from '../components/tag-manager';
 
 function formatMin(m: number) {
   const h = Math.floor(m / 60);
@@ -20,6 +22,7 @@ function dateFromMin(m: number) {
 export default function Settings() {
   const { user, signOut } = useAuth();
   const { wakeMin, sleepMin, setSchedule } = useSchedule();
+  const router = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<'wake' | 'sleep' | null>(null);
 
@@ -41,7 +44,7 @@ export default function Settings() {
   const pickerValue = dateFromMin(editing === 'sleep' ? sleepMin : wakeMin);
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Settings</Text>
 
       <Text style={styles.label}>Account</Text>
@@ -50,10 +53,19 @@ export default function Settings() {
       <Text style={styles.label}>Your day</Text>
       <Pressable style={styles.settingRow} onPress={() => setSheetOpen(true)}>
         <Text style={styles.settingTitle}>Waking hours</Text>
-        <Text style={styles.settingValue}>{formatMin(wakeMin)} – {formatMin(sleepMin)}  ›</Text>
+        <Text style={styles.settingValue}>{formatMin(wakeMin)} – {formatMin(sleepMin)} ›</Text>
       </Pressable>
 
-      <View style={{ marginTop: 24 }}>
+      <Text style={[styles.label, { marginTop: 24 }]}>Habits</Text>
+      <Pressable style={styles.settingRow} onPress={() => router.push('/habits')}>
+        <Text style={styles.settingTitle}>Recurring habits</Text>
+        <Text style={styles.settingValue}>Manage ›</Text>
+      </Pressable>
+
+      <Text style={[styles.label, { marginTop: 24 }]}>Your tags</Text>
+      <TagManager />
+
+      <View style={{ marginTop: 32 }}>
         <Button title="Log out" onPress={handleLogout} />
       </View>
 
@@ -66,7 +78,6 @@ export default function Settings() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>Waking hours</Text>
-
             <Pressable style={styles.timeRow} onPress={() => setEditing('wake')}>
               <Text style={styles.timeLabel}>Wake up</Text>
               <Text style={styles.timeValue}>{formatMin(wakeMin)}</Text>
@@ -75,7 +86,6 @@ export default function Settings() {
               <Text style={styles.timeLabel}>Go to sleep</Text>
               <Text style={styles.timeValue}>{formatMin(sleepMin)}</Text>
             </Pressable>
-
             {editing !== null && (
               <DateTimePicker
                 value={pickerValue}
@@ -85,19 +95,18 @@ export default function Settings() {
                 onChange={onPick}
               />
             )}
-
             <Pressable style={styles.doneButton} onPress={() => { setEditing(null); setSheetOpen(false); }}>
               <Text style={styles.doneText}>Done</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60 },
+  container: { padding: 20, paddingTop: 60, paddingBottom: 60 },
   header: { fontSize: 24, fontWeight: 'bold', marginBottom: 30 },
   label: { fontSize: 14, color: '#666', marginBottom: 8 },
   value: { fontSize: 18, marginBottom: 24 },

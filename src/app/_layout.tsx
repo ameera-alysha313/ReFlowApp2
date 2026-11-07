@@ -2,10 +2,12 @@ import { View, ActivityIndicator, StyleSheet, ColorValue, Image, ImageSourceProp
 import { Tabs } from 'expo-router';
 import { AuthProvider, useAuth } from '../context/auth-context';
 import { TasksProvider } from '../context/task-context';
+import { HabitsProvider } from '../context/habit-context';
 import { ModeProvider } from '../context/mode-context';
 import { ScheduleProvider } from '../context/schedule-context';
 import AuthScreen from '../components/auth-screen';
-import Reengagement from '../components/reengagement';   
+import Reengagement from '../components/reengagement';
+import EndOfDay from '../components/end-of-day';
 
 const tabIcon = (source: ImageSourcePropType) =>
   ({ color, size }: { color: ColorValue; size: number }) => (
@@ -16,7 +18,8 @@ function AppTabs() {
   const { user, loading } = useAuth();
   return (
     <View style={{ flex: 1 }}>
-      <Reengagement />                                 
+      <Reengagement />
+      <EndOfDay />
       <Tabs screenOptions={{ headerShown: false }}>
         <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: tabIcon(require('../../assets/icons/home.png')) }} />
         <Tabs.Screen name="focus" options={{ title: 'Focus', tabBarIcon: tabIcon(require('../../assets/icons/focus.png')) }} />
@@ -25,6 +28,7 @@ function AppTabs() {
         <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: tabIcon(require('../../assets/icons/settings.png')) }} />
         <Tabs.Screen name="add-task" options={{ href: null }} />
         <Tabs.Screen name="history" options={{ href: null }} />
+        <Tabs.Screen name="habits" options={{ href: null }} />
       </Tabs>
       {loading && (
         <View style={styles.loading}>
@@ -40,11 +44,13 @@ export default function Layout() {
   return (
     <AuthProvider>
       <TasksProvider>
-        <ModeProvider>
-          <ScheduleProvider>
-            <AppTabs />
-          </ScheduleProvider>
-        </ModeProvider>
+        <HabitsProvider>
+          <ModeProvider>
+            <ScheduleProvider>
+              <AppTabs />
+            </ScheduleProvider>
+          </ModeProvider>
+        </HabitsProvider>
       </TasksProvider>
     </AuthProvider>
   );

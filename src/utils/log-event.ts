@@ -16,7 +16,8 @@ export type EventType =
   | 'task_passed_over'
   | 'reflection_note'
   | 'app_state'
-  | 'recovery_auto_triggered';
+  | 'recovery_auto_triggered'
+    | 'eod_checkin_done' | 'habit_created' | 'habit_deleted';
   
 
 export function logEvent(

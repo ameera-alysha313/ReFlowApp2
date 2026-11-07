@@ -7,7 +7,7 @@ import { useSchedule } from '../context/schedule-context';
 import { logEvent } from '../utils/log-event';
 import * as Notifications from 'expo-notifications';
 
-const TEST_MODE = true; // set to false for real values
+const TEST_MODE = false;
 
 const REAL_OFFSETS_MIN = [0, 120, 240]; // minutes after the user's next wake time
 const TEST_OFFSETS_SEC = [20, 40, 60];  // seconds after leaving the app

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo} from 'react';
 import {ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useTasks, Task, Priority } from '../context/task-context';
+import { useTasks, Task, Priority, ESSENTIAL_TAGS} from '../context/task-context';
 import { useMode } from '../context/mode-context';
 import {getDoneToday, getModeView, deadlineLabel, daysUntil, MEDIUM_WINDOW_DAYS } from '../utils/mode-view';
 import RecoveryView from '../components/recovery-view';
@@ -138,6 +138,13 @@ export default function Home() {
   const events = useEvents(startOfDay(-14));
   const friction = useMemo(() => computeFrictionMap(tasks, events), [tasks, events]);
   const rec = useMemo(() => recommendTask(tasks, mode, friction), [tasks, mode, friction]);
+
+  const essentials =
+  mode === 'Low'
+    ? tasks.filter(t =>
+        !t.completed && t.habitId && t.tag && ESSENTIAL_TAGS.includes(t.tag) &&
+        t.id !== rec?.task.id && t.id !== chosenId)
+    : [];
 
   useEffect(() => {
     if (rec) logEvent(user?.uid ?? null, 'recommendation_shown', { taskId: rec.task.id, path: rec.path, mode });
@@ -340,6 +347,15 @@ export default function Home() {
       <Text style={styles.header}>Home</Text>
       <Text style={styles.modeLine}>{mode} mode</Text>
 
+      {essentials.length > 0 && (
+        <View style={styles.essentials}>
+          <Text style={styles.essentialsLabel}>Daily essentials</Text>
+          {essentials.map(t => (
+            <TaskRow key={t.id} task={t} showCheckbox onPress={() => toggleTask(t.id)} />
+          ))}
+        </View>
+      )}
+
       {renderContent()}
       
 
@@ -399,4 +415,6 @@ const styles = StyleSheet.create({
   recLabel: { fontSize: 12, color: '#1F5FA8', fontWeight: '700', marginBottom: 4 },
   recTitle: { fontSize: 18, fontWeight: '600' },
   recReason: { fontSize: 13, color: '#44566b', marginTop: 4 },
+  essentials: { backgroundColor: '#e3eefa', borderRadius: 12, padding: 12, marginBottom: 12 },
+essentialsLabel: { fontSize: 12, color: '#1F5FA8', fontWeight: '700', marginBottom: 4 },
 });
