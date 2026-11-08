@@ -3,7 +3,8 @@ import { db } from '../../config/firebaseConfig';
 import { AppState } from 'react-native';
 
 export type EventType =
-  | 'task_created' | 'task_completed' | 'task_uncompleted'
+  | 'onboarding_completed'
+  |'task_created' | 'task_completed' | 'task_uncompleted'
   | 'task_updated' | 'task_deleted'
   | 'task_postponed' | 'task_abandoned'
   | 'task_broken_down'

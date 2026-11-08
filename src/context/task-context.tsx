@@ -10,6 +10,7 @@ import { logEvent } from '../utils/log-event';
 import { breakDownTask } from '../utils/task-breakdown';
 
 export type Priority = 'High' | 'Medium' | 'Low';
+export type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'night';
 export type Subtask = { id: string; title: string; done: boolean };
 export type Task = {
   id: string;
@@ -24,6 +25,7 @@ export type Task = {
   subtasks?: Subtask[];
   friction?: number;
   stakes?: number;
+  timeOfDay?: TimeOfDay; // soft "usually around" time chosen by the user
   habitId?: string;   // set on tasks generated from a recurring habit
   habitDate?: string; // the day (YYYY-MM-DD) this instance belongs to
 };
@@ -35,7 +37,7 @@ type TasksContextType = {
   tags: string[];        // presets + custom
   customTags: string[];  // only the user's own (these can be renamed/deleted)
   addTask: (task: NewTask) => void;
-  toggleTask: (id: string) => void;
+  toggleTask: (id: string, source?: string) => void;
   updateTask: (id: string, changes: Partial<NewTask>) => void;
   deleteTask: (id: string) => void;
   addTag: (tag: string) => void;
@@ -43,9 +45,9 @@ type TasksContextType = {
   deleteTag: (tag: string) => void;
 };
 
-export const PRESET_TAGS = ['Study', 'Chores', 'Admin', 'Personal', 'Hygiene', 'Health', 'Safety'];
+export const PRESET_TAGS = ['Study', 'Chores', 'Admin', 'Personal', 'Hygiene', 'Health'];
 // Habits with these tags stay visible in every mode except Recovery
-export const ESSENTIAL_TAGS = ['Hygiene', 'Health', 'Safety'];
+export const ESSENTIAL_TAGS = ['Hygiene', 'Health'];
 
 const sameTag = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const isPreset = (t: string) => PRESET_TAGS.some(p => sameTag(p, t));
@@ -126,7 +128,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       .catch(e => console.warn('Add task failed', e));
   };
 
-  const toggleTask = (id: string) => {
+  const toggleTask = (id: string, source?: string) => {
     if (!uid) return;
     const task = tasks.find(t => t.id === id);
     if (!task) return;
@@ -135,7 +137,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       completed: nowCompleted,
       completedAt: nowCompleted ? Date.now() : deleteField(),
     })
-      .then(() => logEvent(uid, nowCompleted ? 'task_completed' : 'task_uncompleted', { taskId: id }))
+      .then(() => logEvent(uid, nowCompleted ? 'task_completed' : 'task_uncompleted', { taskId: id, ...(source ? { source } : {}) }))
       .catch(e => console.warn('Toggle failed', e));
   };
 

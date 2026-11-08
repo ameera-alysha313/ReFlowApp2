@@ -8,6 +8,7 @@ import { ScheduleProvider } from '../context/schedule-context';
 import AuthScreen from '../components/auth-screen';
 import Reengagement from '../components/reengagement';
 import EndOfDay from '../components/end-of-day';
+import Onboarding from '../components/onboarding';
 
 const tabIcon = (source: ImageSourcePropType) =>
   ({ color, size }: { color: ColorValue; size: number }) => (
@@ -20,7 +21,7 @@ function AppTabs() {
     <View style={{ flex: 1 }}>
       <Reengagement />
       <EndOfDay />
-      <Tabs screenOptions={{ headerShown: false }}>
+      <Tabs screenOptions={{ headerShown: false, tabBarLabelPosition: 'below-icon', tabBarLabelStyle: { fontSize: 11 } }}>
         <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: tabIcon(require('../../assets/icons/home.png')) }} />
         <Tabs.Screen name="focus" options={{ title: 'Focus', tabBarIcon: tabIcon(require('../../assets/icons/focus.png')) }} />
         <Tabs.Screen name="mode-switch" options={{ title: 'Mode', tabBarIcon: tabIcon(require('../../assets/icons/mode.png')) }} />
@@ -29,13 +30,19 @@ function AppTabs() {
         <Tabs.Screen name="add-task" options={{ href: null }} />
         <Tabs.Screen name="history" options={{ href: null }} />
         <Tabs.Screen name="habits" options={{ href: null }} />
+        <Tabs.Screen name="tags" options={{ href: null }} />
       </Tabs>
       {loading && (
-        <View style={styles.loading}>
+        <View style={[StyleSheet.absoluteFill, styles.loading]}>
           <ActivityIndicator size="large" />
         </View>
       )}
-      {!loading && !user && <AuthScreen />}
+      {!loading && !user && (
+        <View style={StyleSheet.absoluteFill}>
+          <AuthScreen />
+        </View>
+      )}
+      {!loading && user && <Onboarding />}
     </View>
   );
 }
@@ -57,5 +64,5 @@ export default function Layout() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' },
+  loading: { backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' },
 });

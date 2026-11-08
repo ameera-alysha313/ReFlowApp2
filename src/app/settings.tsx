@@ -4,7 +4,6 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/auth-context';
 import { useSchedule } from '../context/schedule-context';
-import TagManager from '../components/tag-manager';
 
 function formatMin(m: number) {
   const h = Math.floor(m / 60);
@@ -62,8 +61,11 @@ export default function Settings() {
         <Text style={styles.settingValue}>Manage ›</Text>
       </Pressable>
 
-      <Text style={[styles.label, { marginTop: 24 }]}>Your tags</Text>
-      <TagManager />
+      <Text style={[styles.label, { marginTop: 24 }]}>Tags</Text>
+      <Pressable style={styles.settingRow} onPress={() => router.push('/tags')}>
+        <Text style={styles.settingTitle}>Custom tags</Text>
+        <Text style={styles.settingValue}>Manage ›</Text>
+      </Pressable>
 
       <View style={{ marginTop: 32 }}>
         <Button title="Log out" onPress={handleLogout} />

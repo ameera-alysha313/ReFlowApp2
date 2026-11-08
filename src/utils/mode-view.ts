@@ -57,8 +57,10 @@ const byPriority = (a: Task, b: Task) =>
   | { kind: 'recovery' };  
 
 export function getModeView(tasks: Task[], mode: Mode): ModeView {
- if (mode === 'Recovery') return { kind: 'recovery' };   // <-- new, before the empty check
+  if (mode === 'Recovery') return { kind: 'recovery' };
   if (tasks.length === 0) return { kind: 'empty', allDone: false };
+
+  tasks = tasks.filter(t => !t.habitId);
 
   // High: everything, open tasks first by priority, completed at the bottom
   if (mode === 'High') {

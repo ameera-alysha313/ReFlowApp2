@@ -3,13 +3,13 @@ import { AppState } from 'react-native';
 import { collection, addDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
 import { useAuth } from './auth-context';
-import { useTasks, ESSENTIAL_TAGS } from './task-context';
+import { useTasks, ESSENTIAL_TAGS, TimeOfDay } from './task-context';
 import { logEvent } from '../utils/log-event';
 import { dateKey } from '../utils/date-key';
 
 // days: 0 = Sunday ... 6 = Saturday
-export type Habit = { id: string; title: string; tag?: string; days: number[]; createdAt?: number };
-type NewHabit = { title: string; tag?: string; days: number[] };
+export type Habit = { id: string; title: string; tag?: string; days: number[]; timeOfDay?: TimeOfDay; createdAt?: number };
+type NewHabit = { title: string; tag?: string; days: number[]; timeOfDay?: TimeOfDay };
 
 type HabitsContextType = {
   habits: Habit[];
@@ -55,6 +55,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           await setDoc(ref, {
             title: h.title,
             ...(h.tag ? { tag: h.tag } : {}),
+            ...(h.timeOfDay ? { timeOfDay: h.timeOfDay } : {}),
             completed: false,
             deadline: today,
             important: false,
@@ -90,9 +91,10 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       title: h.title,
       days: h.days,
       ...(h.tag ? { tag: h.tag } : {}),
+      ...(h.timeOfDay ? { timeOfDay: h.timeOfDay } : {}),
       createdAt: Date.now(),
     })
-      .then(ref => logEvent(uid, 'habit_created', { habitId: ref.id, tag: h.tag ?? null, dayCount: h.days.length }))
+      .then(ref => logEvent(uid, 'habit_created', { habitId: ref.id, tag: h.tag ?? null, dayCount: h.days.length, timeOfDay: h.timeOfDay ?? null }))
       .catch(e => console.warn('Add habit failed', e));
   };
 

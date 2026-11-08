@@ -39,6 +39,7 @@ export default function AuthScreen() {
       <TextInput
         style={styles.input}
         placeholder="Email"
+        placeholderTextColor="#888"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -48,6 +49,7 @@ export default function AuthScreen() {
       <TextInput
         style={styles.input}
         placeholder="Password"
+        placeholderTextColor="#888"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -78,7 +80,7 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, justifyContent: 'center', padding: 30 },
   title: { fontSize: 36, fontWeight: 'bold', textAlign: 'center', marginBottom: 6 },
   subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 30 },
-  input: { backgroundColor: 'white', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 16 },
+  input: {color: '#111', backgroundColor: 'white', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 16 },
   error: { color: '#c0392b', marginBottom: 12 },
   primaryButton: { backgroundColor: '#4A90D9', borderRadius: 8, paddingVertical: 14, alignItems: 'center', marginBottom: 20 },
   primaryButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },

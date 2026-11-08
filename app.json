@@ -1,21 +1,20 @@
 {
   "expo": {
-    "name": "ReFlowApp2",
+    "name": "ReFlo",
     "slug": "ReFlowApp2",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icons/ReFloIcon.png",
     "scheme": "reflowapp2",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light", 
     "ios": {
       "icon": "./assets/expo.icon"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/icons/ReFloIcon.png",
+        "monochromeImage": "./assets/icons/ReFloMonochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.ReFloApp"

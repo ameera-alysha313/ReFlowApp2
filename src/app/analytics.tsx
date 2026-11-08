@@ -11,6 +11,8 @@ import {
   summarise, modeSecondsByDay, dominantMode, completedHourCounts, focusSecondsByStartHour,
 } from '../utils/analytics-summary';
 
+import DayNote from '../components/day-note';
+
 type Range = 'today' | 'week';
 type Metric = 'task_completed' | 'focus_time';
 
@@ -154,8 +156,6 @@ export default function Analytics() {
   const [range, setRange] = useState<Range>('today');
   const [metric, setMetric] = useState<Metric>('task_completed');
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
-  const [draft, setDraft] = useState('');
-  const [saved, setSaved] = useState(false);
 
   const events = useEvents(startOfDay(-(CHART_DAYS - 1)));
 
@@ -186,21 +186,9 @@ export default function Analytics() {
       ? 'Not enough data yet. This fills in as you use the app.'
       : `Most often around ${hourLabel(peakHour)}. Tap a bar for details.`;
 
-  // Prefill the reflection box with today's saved note
-  useEffect(() => {
-    if (todayNote) setDraft(todayNote);
-  }, [todayNote]);
-
   const completedTitles = summary.completedTaskIds.map(
     id => tasks.find(t => t.id === id)?.title ?? 'A task you finished'
   );
-
-  const saveNote = () => {
-    if (!draft.trim()) return;
-    logEvent(uid, 'reflection_note', { text: draft.trim() });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
 
   const openDay = (ts: number) => router.push({ pathname: '/history', params: { date: String(ts) } });
   const periodWord = range === 'today' ? 'today' : 'this week';
@@ -283,19 +271,12 @@ export default function Analytics() {
 
       {/* Optional reflection (today only) */}
       {range === 'today' && (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>End-of-day note (optional)</Text>
-          <TextInput
-            style={styles.noteInput}
-            placeholder="Anything you want to remember about today?"
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-          />
-          <Pressable style={styles.primaryButton} onPress={saveNote}>
-            <Text style={styles.primaryButtonText}>{saved ? 'Saved' : 'Save note'}</Text>
-          </Pressable>
-        </View>
+        <DayNote
+          note={todayNote}
+          editable
+          editStyle="button"
+          onSave={text => logEvent(uid, 'reflection_note', { text })}
+        />
       )}
     </ScrollView>
   );

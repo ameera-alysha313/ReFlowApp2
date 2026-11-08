@@ -8,6 +8,10 @@ import {
   startOfDay, startOfWeek, addDays, formatDuration,
   daySummary, modeSecondsByDay, dominantMode,
 } from '../utils/analytics-summary';
+import { useAuth } from '../context/auth-context';
+import { logEvent } from '../utils/log-event';
+import DayNote from '../components/day-note';
+
 
 const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const FULL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -22,9 +26,12 @@ export default function History() {
   const router = useRouter();
   const params = useLocalSearchParams<{ date?: string }>();
   const { tasks } = useTasks();
+  const { user } = useAuth();
   const todayStart = startOfDay();
 
   const [selected, setSelected] = useState(todayStart);
+
+  const isToday = selected === todayStart;
 
   // This screen stays mounted as a hidden tab, so follow the date passed in from Analytics
   useEffect(() => {
@@ -139,12 +146,15 @@ export default function History() {
         )}
       </View>
 
-      {day.note ? (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your note</Text>
-          <Text style={styles.noteText}>{day.note}</Text>
-        </View>
-      ) : null}
+      {(isToday || day.note) && (
+        <DayNote
+            key={selected}
+            note={day.note}
+            editable={isToday}
+            editStyle="pencil"
+            onSave={t => logEvent(user?.uid ?? null, 'reflection_note', { text: t })}
+        />
+        )}
     </ScrollView>
   );
 }

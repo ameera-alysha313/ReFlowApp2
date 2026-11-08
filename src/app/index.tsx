@@ -10,7 +10,8 @@ import { logEvent } from '../utils/log-event';
 import { breakDownTask } from '../utils/task-breakdown';
 import { useEvents } from '../utils/use-events';
 import { startOfDay } from '../utils/analytics-summary';
-import { computeFrictionMap, recommendTask } from '../utils/recommend-task';
+import { computeFrictionMap, recommendTask, computeTimeProfile, bucketOf } from '../utils/recommend-task';
+import  HabitsToday  from '../components/habits-today';
 
 // Neutral blues/grey: traffic-light colours are reserved for the mood picker
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -135,10 +136,14 @@ export default function Home() {
   const view = getModeView(tasks, mode);
   const doneToday = getDoneToday(tasks);
   const chosen = chosenId ? tasks.find(t => t.id === chosenId && !t.completed) : undefined;
-  const events = useEvents(startOfDay(-14));
-  const friction = useMemo(() => computeFrictionMap(tasks, events), [tasks, events]);
-  const rec = useMemo(() => recommendTask(tasks, mode, friction), [tasks, mode, friction]);
-
+const events = useEvents(startOfDay(-30));   // was -14
+const friction = useMemo(() => computeFrictionMap(tasks, events), [tasks, events]);
+const timeProfile = useMemo(() => computeTimeProfile(tasks, events), [tasks, events]);
+const bucket = bucketOf(new Date().getHours());
+const rec = useMemo(
+  () => recommendTask(tasks, mode, friction, timeProfile, bucket),
+  [tasks, mode, friction, timeProfile, bucket]
+);
   const essentials =
   mode === 'Low'
     ? tasks.filter(t =>
@@ -346,6 +351,8 @@ export default function Home() {
     <View style={styles.container}>
       <Text style={styles.header}>Home</Text>
       <Text style={styles.modeLine}>{mode} mode</Text>
+
+      {(mode === 'Medium' || mode === 'High') && <HabitsToday />}
 
       {essentials.length > 0 && (
         <View style={styles.essentials}>

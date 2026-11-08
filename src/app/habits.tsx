@@ -3,10 +3,18 @@ import { View, Text, TextInput, StyleSheet, Pressable, ScrollView } from 'react-
 import { useRouter } from 'expo-router';
 import { useTasks } from '../context/task-context';
 import { useHabits } from '../context/habit-context';
+import type { TimeOfDay } from '../context/task-context';
 
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+const TIMES: { key: TimeOfDay; label: string }[] = [
+  { key: 'morning', label: 'Morning' },
+  { key: 'afternoon', label: 'Afternoon' },
+  { key: 'evening', label: 'Evening' },
+  { key: 'night', label: 'Night' },
+];
+const timeLabel = (k?: TimeOfDay) => TIMES.find(t => t.key === k)?.label;
 
 function daysLabel(days: number[]) {
   if (days.length === 7) return 'Every day';
@@ -20,6 +28,7 @@ export default function Habits() {
   const [title, setTitle] = useState('');
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [days, setDays] = useState<number[]>(ALL_DAYS);
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay | undefined>(undefined);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const toggleDay = (d: number) =>
@@ -27,7 +36,8 @@ export default function Habits() {
 
   const save = () => {
     if (!title.trim() || days.length === 0) return;
-    addHabit({ title: title.trim(), days, ...(tag ? { tag } : {}) });
+    addHabit({ title: title.trim(), days, ...(tag ? { tag } : {}), ...(timeOfDay ? { timeOfDay } : {}) });
+    setTimeOfDay(undefined);
     setTitle('');
     setTag(undefined);
     setDays(ALL_DAYS);
@@ -45,7 +55,7 @@ export default function Habits() {
 
       <View style={styles.card}>
         <Text style={styles.cardLabel}>New habit</Text>
-        <TextInput style={styles.input} placeholder="e.g. Brush teeth" value={title} onChangeText={setTitle} />
+        <TextInput style={styles.input} placeholder="e.g. Brush teeth" placeholderTextColor="#888" value={title} onChangeText={setTitle} />
 
         <Text style={styles.cardLabel}>Repeats on</Text>
         <View style={styles.dayRow}>
@@ -56,6 +66,15 @@ export default function Habits() {
               onPress={() => toggleDay(i)}
             >
               <Text style={days.includes(i) && styles.chipTextSelected}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.cardLabel}>Usually around (optional)</Text>
+        <View style={styles.chipRow}>
+          {TIMES.map(t => (
+            <Pressable key={t.key} style={[styles.chip, timeOfDay === t.key && styles.chipSelected]} onPress={() => setTimeOfDay(timeOfDay === t.key ? undefined : t.key)}>
+              <Text style={timeOfDay === t.key && styles.chipTextSelected}>{t.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -73,7 +92,7 @@ export default function Habits() {
           ))}
         </View>
         <Text style={styles.hint}>
-          Hygiene, Health and Safety habits stay visible even in Low mode.
+          Hygiene and Health habits stay visible even in Low mode.
         </Text>
 
         <Pressable style={[styles.primaryButton, (!title.trim() || days.length === 0) && { opacity: 0.5 }]} onPress={save}>
@@ -89,7 +108,7 @@ export default function Habits() {
           <View key={h.id} style={styles.habitRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.habitTitle}>{h.title}</Text>
-              <Text style={styles.habitMeta}>{daysLabel(h.days)}{h.tag ? ` · ${h.tag}` : ''}</Text>
+              <Text style={styles.habitMeta}>{daysLabel(h.days)}{h.timeOfDay ? ` · ${timeLabel(h.timeOfDay)}` : ''}{h.tag ? ` · ${h.tag}` : ''}</Text>
             </View>
             {confirming === h.id ? (
               <View style={styles.confirmRow}>
@@ -119,7 +138,7 @@ const styles = StyleSheet.create({
   header: { fontSize: 24, fontWeight: 'bold' },
   card: { backgroundColor: 'white', borderRadius: 16, padding: 20, marginBottom: 20, elevation: 2 },
   cardLabel: { fontSize: 14, color: '#666', marginBottom: 8, marginTop: 6 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10, color: '#111' },
   dayRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
   dayChip: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 8 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
