@@ -8,12 +8,12 @@
     "scheme": "reflowapp2",
     "userInterfaceStyle": "light", 
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/icons/ReFloIcon.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/icons/ReFloIcon.png",
+        "backgroundColor": "#F7F7F7",
+        "foregroundImage": "./assets/icons/ReFloIconTransparent.png",
         "monochromeImage": "./assets/icons/ReFloMonochrome.png"
       },
       "predictiveBackGestureEnabled": false,
@@ -28,12 +28,19 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
+          "backgroundColor": "#F7F7F7",
+          "image": "./assets/icons/ReFloIconTransparent.png",
           "imageWidth": 76
         }
       ],
-      "@react-native-community/datetimepicker"
+       "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icons/ReFloIcon.png",
+          "color": "#4A90D9"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

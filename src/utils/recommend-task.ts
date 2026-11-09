@@ -97,7 +97,7 @@ export function computeTimeProfile(
 
   // Ticks: lower weight, spread over the hours before the tick, bursts down-weighted
   const ticks = events
-    .filter(e => e.type === 'task_completed' && e.source !== 'eod' && e.taskId && typeof e.localHour === 'number')
+    .filter(e => e.type === 'task_completed' && !e.source && e.taskId && typeof e.localHour === 'number')
     .sort((a, b) => a.clientTime - b.clientTime);
   for (const e of ticks) {
     const tag = tagOf.get(e.taskId);
@@ -138,7 +138,8 @@ export function recommendTask(
   bucket: TimeBucket = bucketOf(new Date().getHours())
 ): Recommendation | null {
   if (mode === 'High' || mode === 'Recovery') return null;
-  const open = tasks.filter(t => !t.completed);
+  // Habits live in their own "Today's habits" card, so they are never the suggested start
+  const open = tasks.filter(t => !t.completed && !t.habitId);
   if (open.length === 0) return null;
 
   const f = (t: Task) => friction.get(t.id) ?? 0.5;

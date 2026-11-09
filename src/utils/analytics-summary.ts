@@ -168,7 +168,8 @@ export function hourCounts(events: EventDoc[], type: string): number[] {
   return counts;
 }
 
-// Only tasks that are *currently* completed, so undone accidental ticks don't count
+// Only tasks that are *currently* completed, so undone accidental ticks don't count.
+// Ticks made from a check-in (they have a `source`) are ignored, since they're done earlier.
 export function completedHourCounts(events: EventDoc[]): number[] {
   const counts: number[] = new Array(24).fill(0);
   const latest = new Map<string, EventDoc>();
@@ -177,7 +178,7 @@ export function completedHourCounts(events: EventDoc[]): number[] {
     if (e.type === 'task_completed' || e.type === 'task_uncompleted') latest.set(e.taskId, e);
   }
   latest.forEach(e => {
-    if (e.type === 'task_completed' && typeof e.localHour === 'number') counts[e.localHour] += 1;
+    if (e.type === 'task_completed' && !e.source && typeof e.localHour === 'number') counts[e.localHour] += 1;
   });
   return counts;
 }

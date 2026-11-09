@@ -8,6 +8,7 @@ export type EventType =
   | 'task_updated' | 'task_deleted'
   | 'task_postponed' | 'task_abandoned'
   | 'task_broken_down'
+  | 'task_steps_edited'
   | 'recommendation_shown' | 'recommendation_accepted'
   | 'mode_switched'
   | 'schedule_set'
@@ -18,7 +19,7 @@ export type EventType =
   | 'reflection_note'
   | 'app_state'
   | 'recovery_auto_triggered'
-    | 'eod_checkin_done' | 'habit_created' | 'habit_deleted';
+  | 'eod_checkin_done' | 'habit_created' | 'habit_deleted' | 'habit_updated' | 'onboarding_completed';
   
 
 export function logEvent(

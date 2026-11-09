@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import { Alert, View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTasks, Priority, TimeOfDay } from '../context/task-context';
 import { useHabits } from '../context/habit-context';
 import { suggestPriority } from '../utils/suggest-priority';
 import { dateKey, tomorrowKey } from '../utils/date-key';
+import { confirmDelete } from '../utils/confirm';
 
 const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -27,37 +28,59 @@ function dateFromKey(key: string) {
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
 }
 
+// One form for tasks AND habits.
+//   /add-task                    -> new task
+//   /add-task?habit=1            -> new habit (Repeat switched on)
+//   /add-task?id=...             -> edit a task
+//   /add-task?habitId=...        -> edit a habit
 export default function AddTask() {
   const [title, setTitle] = useState('');
   const [deadline, setDeadline] = useState('');
   const [showPicker, setShowPicker] = useState(false);
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [newTag, setNewTag] = useState('');
-  const [important, setImportant] = useState(false);
   const [priorityOverride, setPriorityOverride] = useState<Priority | null>(null);
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay | undefined>(undefined);
   const [repeat, setRepeat] = useState(false);
   const [days, setDays] = useState<number[]>(ALL_DAYS);
   const { addTask, updateTask, tasks, tags, addTag, deleteTask } = useTasks();
-  const { addHabit } = useHabits();
+  const { habits, addHabit, updateHabit, deleteHabit } = useHabits();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, habit, habitId } = useLocalSearchParams<{ id?: string; habit?: string; habitId?: string }>();
   const editing = id ? tasks.find(t => t.id === id) : undefined;
+  const editingHabit = habitId ? habits.find(h => h.id === habitId) : undefined;
+  const loadedHabit = useRef<string | null>(null);
 
-  // This tab stays mounted, so state must be re-filled whenever the id changes
+  // This tab stays mounted, so state must be re-filled whenever the params change
   useEffect(() => {
+    if (habitId) return; // the habit effect below handles this
+    loadedHabit.current = null;
     setTitle(editing?.title ?? '');
     setDeadline(editing?.deadline ?? '');
     setTag(editing?.tag);
-    setImportant(editing?.important ?? false);
     setPriorityOverride(editing?.priority ?? null);
     setTimeOfDay(editing?.timeOfDay);
-    setRepeat(false);
+    setRepeat(!!habit && !id);
     setDays(ALL_DAYS);
     setShowPicker(false);
-  }, [id]);
+  }, [id, habit, habitId]);
 
-  const suggested = suggestPriority(deadline || undefined, important);
+  useEffect(() => {
+    if (!habitId || !editingHabit || loadedHabit.current === habitId) return;
+    loadedHabit.current = habitId;
+    setTitle(editingHabit.title);
+    setDeadline('');
+    setTag(editingHabit.tag);
+    setPriorityOverride(null);
+    setTimeOfDay(editingHabit.timeOfDay);
+    setRepeat(true);
+    setDays(editingHabit.days);
+    setShowPicker(false);
+  }, [habitId, editingHabit]);
+
+  const habitMode = !!editingHabit || (repeat && !editing);
+
+  const suggested = suggestPriority(deadline || undefined, false);
   const priority = priorityOverride ?? suggested;
 
   const todayK = dateKey();
@@ -85,67 +108,85 @@ export default function AddTask() {
     setDeadline('');
     setTag(undefined);
     setNewTag('');
-    setImportant(false);
     setPriorityOverride(null);
     setTimeOfDay(undefined);
     setRepeat(false);
     setDays(ALL_DAYS);
   };
 
-  const handleSubmit = () => {
-    if (!title.trim()) return;
-    if (repeat && !editing) {
-      if (days.length === 0) return;
-      addHabit({ title: title.trim(), days, ...(tag ? { tag } : {}), ...(timeOfDay ? { timeOfDay } : {}) });
-      resetForm();
-      router.back();
-      return;
-    }
-    const data = { title: title.trim(), deadline: deadline || undefined, tag, important, priority, timeOfDay };
-    if (editing) updateTask(editing.id, data);
-    else addTask(data);
+  // Clearing the params means the next visit with the same id still reloads the form
+  const finish = () => {
+    loadedHabit.current = null;
     resetForm();
+    router.setParams({ id: '', habit: '', habitId: '' });
     router.back();
   };
 
-  const handleDelete = () => {
-    if (!editing) return;
-    const doDelete = () => {
-      deleteTask(editing.id);
-      router.back();
-    };
-    // Alert.alert doesn't work on web, so use the browser's confirm box there
-    if (Platform.OS === 'web') {
-      if (window.confirm("Delete this task? This can't be undone.")) doDelete();
+  const handleSubmit = () => {
+    if (!title.trim()) return;
+    if (habitMode) {
+      if (days.length === 0) return;
+      const data = {
+        title: title.trim(),
+        days,
+        ...(tag ? { tag } : {}),
+        ...(timeOfDay ? { timeOfDay } : {}),
+      };
+      if (editingHabit) updateHabit(editingHabit.id, data);
+      else addHabit(data);
+      finish();
       return;
     }
-    Alert.alert('Delete this task?', "This can't be undone.", [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: doDelete },
-    ]);
+    const data = {
+      title: title.trim(),
+      deadline: deadline || undefined,
+      tag,
+      // "important" now just means: the user raised priority to High above what the deadline suggests
+      important: priority === 'High' && suggested !== 'High',
+      priority,
+      timeOfDay,
+    };
+    if (editing) updateTask(editing.id, data);
+    else addTask(data);
+    finish();
   };
 
-  const showRepeat = repeat && !editing;
+  const handleDelete = () => {
+    if (editingHabit) {
+      confirmDelete('Delete this habit?', 'It stops repeating. Past records stay.', () => {
+        deleteHabit(editingHabit.id);
+        finish();
+      });
+    } else if (editing) {
+      confirmDelete('Delete this task?', "This can't be undone.", () => {
+        deleteTask(editing.id);
+        finish();
+      });
+    }
+  };
+
+  const heading = editingHabit ? 'Edit Habit' : editing ? 'Edit Task' : habitMode ? 'New Habit' : 'Add Task';
+  const saveLabel = editingHabit || editing ? 'Save Changes' : habitMode ? 'Save Habit' : 'Save Task';
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.header}>{editing ? 'Edit Task' : showRepeat ? 'New Habit' : 'Add Task'}</Text>
+      <Text style={styles.header}>{heading}</Text>
       <TextInput
         style={styles.input}
-        placeholder={showRepeat ? 'Habit name' : 'Task name'}
+        placeholder={habitMode ? 'Habit name' : 'Task name'}
         placeholderTextColor="#888"
         value={title}
         onChangeText={setTitle}
       />
 
-      {!editing && (
+      {!editing && !editingHabit && (
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>Repeat (make this a habit)</Text>
           <Switch value={repeat} onValueChange={setRepeat} />
         </View>
       )}
 
-      {showRepeat ? (
+      {habitMode ? (
         <>
           <Text style={styles.label}>Repeats on</Text>
           <View style={styles.dayRow}>
@@ -160,13 +201,7 @@ export default function AddTask() {
         <>
           <Text style={styles.label}>Deadline</Text>
           {Platform.OS === 'web' ? (
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#888"
-              value={deadline}
-              onChangeText={setDeadline}
-            />
+            <TextInput style={styles.input} placeholder="YYYY-MM-DD" placeholderTextColor="#888" value={deadline} onChangeText={setDeadline} />
           ) : (
             <>
               <View style={styles.chipRow}>
@@ -230,13 +265,8 @@ export default function AddTask() {
         <Text style={styles.manageLink}>Manage my tags ›</Text>
       </Pressable>
 
-      {!showRepeat && (
+      {!habitMode && (
         <>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>This is important</Text>
-            <Switch value={important} onValueChange={setImportant} />
-          </View>
-
           <Text style={styles.label}>Priority (suggested: {suggested})</Text>
           <View style={styles.chipRow}>
             {PRIORITIES.map(p => (
@@ -248,10 +278,12 @@ export default function AddTask() {
         </>
       )}
 
-      <Button title={editing ? 'Save Changes' : showRepeat ? 'Save Habit' : 'Save Task'} onPress={handleSubmit} />
-      {editing && (
+      <View style={{ marginTop: 10 }}>
+        <Button title={saveLabel} onPress={handleSubmit} />
+      </View>
+      {(editing || editingHabit) && (
         <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <Text style={styles.deleteText}>Delete task</Text>
+          <Text style={styles.deleteText}>{editingHabit ? 'Delete habit' : 'Delete task'}</Text>
         </Pressable>
       )}
     </ScrollView>
@@ -272,7 +304,7 @@ const styles = StyleSheet.create({
   dayChip: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 8 },
   customTagRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   customTagInput: { flex: 1, marginBottom: 0 },
-  manageLink: { color: '#4A90D9', fontSize: 14, marginTop: 8 },
+  manageLink: { color: '#4A90D9', fontSize: 14, marginTop: 8, marginBottom: 6 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
   switchLabel: { fontSize: 16, color: '#111' },
   deleteButton: { marginTop: 40, alignItems: 'center', padding: 12 },

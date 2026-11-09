@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { AppState } from 'react-native';
-import { collection, addDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, deleteField, updateDoc, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebaseConfig';
 import { useAuth } from './auth-context';
 import { useTasks, ESSENTIAL_TAGS, TimeOfDay } from './task-context';
@@ -14,6 +14,7 @@ type NewHabit = { title: string; tag?: string; days: number[]; timeOfDay?: TimeO
 type HabitsContextType = {
   habits: Habit[];
   addHabit: (h: NewHabit) => void;
+  updateHabit: (id: string, h: NewHabit) => void;
   deleteHabit: (id: string) => void;
 };
 
@@ -98,6 +99,35 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       .catch(e => console.warn('Add habit failed', e));
   };
 
+  const updateHabit = (id: string, h: NewHabit) => {
+    if (!uid) return;
+    updateDoc(doc(db, 'users', uid, 'habits', id), {
+      title: h.title,
+      days: h.days,
+      tag: h.tag ?? deleteField(),
+      timeOfDay: h.timeOfDay ?? deleteField(),
+    })
+      .then(() => logEvent(uid, 'habit_updated', { habitId: id }))
+      .catch(e => console.warn('Update habit failed', e));
+    // today's unfinished task follows the edit (or goes away if it's no longer scheduled today)
+    const today = dateKey();
+    const dow = new Date().getDay();
+    const essential = !!h.tag && ESSENTIAL_TAGS.includes(h.tag);
+    tasks
+      .filter(t => t.habitId === id && t.habitDate === today && !t.completed)
+      .forEach(t => {
+        const ref = doc(db, 'users', uid, 'tasks', t.id);
+        if (!h.days.includes(dow)) { deleteDoc(ref).catch(() => {}); return; }
+        updateDoc(ref, {
+          title: h.title,
+          tag: h.tag ?? deleteField(),
+          timeOfDay: h.timeOfDay ?? deleteField(),
+          priority: essential ? 'High' : 'Low',
+          stakes: essential ? 0.8 : 0.3,
+        }).catch(() => {});
+      });
+  };
+
   const deleteHabit = (id: string) => {
     if (!uid) return;
     // remove today's unfinished instance too
@@ -110,7 +140,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <HabitsContext.Provider value={{ habits, addHabit, deleteHabit }}>
+    <HabitsContext.Provider value={{ habits, addHabit, updateHabit, deleteHabit }}>
       {children}
     </HabitsContext.Provider>
   );

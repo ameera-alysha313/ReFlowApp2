@@ -154,7 +154,7 @@ export default function Analytics() {
   const uid = user?.uid ?? null;
 
   const [range, setRange] = useState<Range>('today');
-  const [metric, setMetric] = useState<Metric>('task_completed');
+  const [metric, setMetric] = useState<Metric>('focus_time');
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
 
   const events = useEvents(startOfDay(-(CHART_DAYS - 1)));
@@ -250,11 +250,11 @@ export default function Analytics() {
 
       {/* Time-of-day chart */}
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>When you're most active (last 5 weeks)</Text>
+        <Text style={styles.cardLabel}>When you work (last 5 weeks)</Text>
         <View style={styles.toggleRow}>
           {([
-            ['task_completed', 'Tasks completed'],
             ['focus_time', 'Focus time'],
+            ['task_completed', 'Tasks ticked off'],
           ] as [Metric, string][]).map(([key, label]) => (
             <Pressable
               key={key}
@@ -266,6 +266,9 @@ export default function Analytics() {
           ))}
         </View>
         <HourChart values={values} selected={selectedHour} onSelect={setSelectedHour} />
+        {metric === 'task_completed' && (
+          <Text style={styles.cardMeta}>Based on when you tick tasks off, which can be later than when you did them.</Text>
+        )}
         <Text style={[styles.detailText]}>{detailText}</Text>
       </View>
 
