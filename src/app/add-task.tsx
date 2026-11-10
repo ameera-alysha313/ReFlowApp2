@@ -2,7 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useTasks, Priority, TimeOfDay } from '../context/task-context';
+import { useTasks, Priority, TimeOfDay, Task, Subtask } from '../context/task-context';
+import { useMode } from '../context/mode-context';
+import { useAuth } from '../context/auth-context';
+import StepsDraft from '../components/steps-draft';
+import { breakDownTask } from '../utils/task-breakdown';
+import { logEvent } from '../utils/log-event';
 import { useHabits } from '../context/habit-context';
 import { suggestPriority } from '../utils/suggest-priority';
 import { dateKey, tomorrowKey } from '../utils/date-key';
@@ -43,6 +48,12 @@ export default function AddTask() {
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay | undefined>(undefined);
   const [repeat, setRepeat] = useState(false);
   const [days, setDays] = useState<number[]>(ALL_DAYS);
+  const [steps, setSteps] = useState<Subtask[]>([]);
+  const [pendingStep, setPendingStep] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [rating, setRating] = useState<{ friction?: number; stakes?: number }>({});
+  const { mode } = useMode();
+  const { user } = useAuth();
   const { addTask, updateTask, tasks, tags, addTag, deleteTask } = useTasks();
   const { habits, addHabit, updateHabit, deleteHabit } = useHabits();
   const router = useRouter();
@@ -59,7 +70,10 @@ export default function AddTask() {
     setDeadline(editing?.deadline ?? '');
     setTag(editing?.tag);
     setPriorityOverride(editing?.priority ?? null);
-    setTimeOfDay(editing?.timeOfDay);
+    setTimeOfDay(undefined); // "usually around" is for habits only
+    setSteps((editing?.subtasks ?? []).map(s => ({ ...s })));
+    setPendingStep('');
+    setRating({});
     setRepeat(!!habit && !id);
     setDays(ALL_DAYS);
     setShowPicker(false);
@@ -73,6 +87,8 @@ export default function AddTask() {
     setTag(editingHabit.tag);
     setPriorityOverride(null);
     setTimeOfDay(editingHabit.timeOfDay);
+    setSteps([]);
+    setPendingStep('');
     setRepeat(true);
     setDays(editingHabit.days);
     setShowPicker(false);
@@ -103,6 +119,21 @@ export default function AddTask() {
     setNewTag('');
   };
 
+  const generateSteps = async () => {
+    if (!title.trim()) return;
+    setGenerating(true);
+    const draftTask = {
+      id: 'draft', title: title.trim(), completed: false, important: false, priority,
+      tag, deadline: deadline || undefined,
+    } as Task;
+    const r = await breakDownTask(draftTask, mode);
+    setSteps(r.subtasks);
+    setPendingStep('');
+    setRating({ friction: r.friction, stakes: r.stakes });
+    logEvent(user?.uid ?? null, 'task_broken_down', { source: r.source, count: r.subtasks.length, mode, where: 'form' });
+    setGenerating(false);
+  };
+
   const resetForm = () => {
     setTitle('');
     setDeadline('');
@@ -110,6 +141,9 @@ export default function AddTask() {
     setNewTag('');
     setPriorityOverride(null);
     setTimeOfDay(undefined);
+    setSteps([]);
+    setPendingStep('');
+    setRating({});
     setRepeat(false);
     setDays(ALL_DAYS);
   };
@@ -137,6 +171,9 @@ export default function AddTask() {
       finish();
       return;
     }
+    const allSteps = [...steps, ...(pendingStep.trim() ? [{ id: `${Date.now()}-p`, title: pendingStep, done: false }] : [])]
+      .map(x => ({ ...x, title: x.title.trim() }))
+      .filter(x => x.title);
     const data = {
       title: title.trim(),
       deadline: deadline || undefined,
@@ -144,7 +181,9 @@ export default function AddTask() {
       // "important" now just means: the user raised priority to High above what the deadline suggests
       important: priority === 'High' && suggested !== 'High',
       priority,
-      timeOfDay,
+      ...(editing ? { subtasks: allSteps, timeOfDay: undefined } : allSteps.length ? { subtasks: allSteps } : {}),
+      ...(rating.friction !== undefined ? { friction: rating.friction } : {}),
+      ...(rating.stakes !== undefined ? { stakes: rating.stakes } : {}),
     };
     if (editing) updateTask(editing.id, data);
     else addTask(data);
@@ -234,6 +273,8 @@ export default function AddTask() {
         </>
       )}
 
+      {habitMode && (
+        <>
       <Text style={styles.label}>Usually around (optional)</Text>
       <View style={styles.chipRow}>
         {TIMES.map(t => (
@@ -242,6 +283,8 @@ export default function AddTask() {
           </Pressable>
         ))}
       </View>
+        </>
+      )}
 
       <Text style={styles.label}>Tag</Text>
       <View style={styles.chipRow}>
@@ -264,6 +307,26 @@ export default function AddTask() {
       <Pressable onPress={() => router.push('/tags')}>
         <Text style={styles.manageLink}>Manage my tags ›</Text>
       </Pressable>
+
+      {!habitMode && (
+        <>
+          <Text style={styles.label}>Small steps (optional)</Text>
+          {!!editing && steps.length > 0 && title.trim() !== editing.title && (
+            <Text style={styles.staleHint}>
+              You changed the task name, so these steps may not fit any more. Edit them, or regenerate.
+            </Text>
+          )}
+          <StepsDraft
+            steps={steps}
+            onChange={setSteps}
+            pending={pendingStep}
+            onPendingChange={setPendingStep}
+            onGenerate={generateSteps}
+            generating={generating}
+            canGenerate={!!title.trim()}
+          />
+        </>
+      )}
 
       {!habitMode && (
         <>
@@ -304,6 +367,7 @@ const styles = StyleSheet.create({
   dayChip: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 8 },
   customTagRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   customTagInput: { flex: 1, marginBottom: 0 },
+  staleHint: { fontSize: 13, color: '#B26A00', marginBottom: 8 },
   manageLink: { color: '#4A90D9', fontSize: 14, marginTop: 8, marginBottom: 6 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
   switchLabel: { fontSize: 16, color: '#111' },

@@ -111,18 +111,16 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         logEvent(uid, 'task_created', {
           taskId: ref.id, tag: task.tag, priority: task.priority, hasDeadline: !!task.deadline,
         });
-        // Background breakdown + difficulty estimate, so it's ready when the task is opened
+        // Background difficulty/consequence rating for the recommender.
+        // Small steps are NOT saved here; the user generates or writes them on request.
+        if (task.friction !== undefined && task.stakes !== undefined) return; // already rated in the form
         breakDownTask({ ...task, id: ref.id, completed: false } as Task, 'Medium').then(r => {
-          if (r.source === 'generic') return; // leave empty so the button can retry later
+          if (r.source === 'generic') return;
           updateDoc(doc(db, 'users', uid, 'tasks', ref.id), {
-            subtasks: r.subtasks,
             ...(r.friction !== undefined ? { friction: r.friction } : {}),
             ...(r.stakes !== undefined ? { stakes: r.stakes } : {}),
           });
-          logEvent(uid, 'task_broken_down', {
-            taskId: ref.id, source: r.source, count: r.subtasks.length,
-            mode: 'Medium', model: r.model ?? null, ms: r.ms, auto: true,
-          });
+          logEvent(uid, 'task_rated', { taskId: ref.id, source: r.source, model: r.model ?? null, ms: r.ms });
         });
       })
       .catch(e => console.warn('Add task failed', e));
@@ -149,11 +147,26 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       Object.entries(changes).map(([k, v]) => [k, v === undefined ? deleteField() : v])
     );
     updateDoc(doc(db, 'users', uid, 'tasks', id), clean)
-      .then(() => logEvent(uid, 'task_updated', {
-        taskId: id,
-        oldDeadline: before?.deadline ?? null,
-        newDeadline: 'deadline' in changes ? (changes.deadline ?? null) : (before?.deadline ?? null),
-      }))
+      .then(() => {
+        logEvent(uid, 'task_updated', {
+          taskId: id,
+          oldDeadline: before?.deadline ?? null,
+          newDeadline: 'deadline' in changes ? (changes.deadline ?? null) : (before?.deadline ?? null),
+        });
+        // A new name means the old difficulty rating may not fit any more, so re-rate in the background.
+        // (Steps are never rewritten automatically, since the user may have edited them.)
+        const renamed = 'title' in changes && !!changes.title && changes.title !== before?.title;
+        if (renamed && before && !('friction' in changes)) {
+          breakDownTask({ ...before, ...changes } as Task, 'Medium').then(r => {
+            if (r.source === 'generic') return;
+            updateDoc(doc(db, 'users', uid, 'tasks', id), {
+              ...(r.friction !== undefined ? { friction: r.friction } : {}),
+              ...(r.stakes !== undefined ? { stakes: r.stakes } : {}),
+            });
+            logEvent(uid, 'task_rated', { taskId: id, source: r.source, model: r.model ?? null, ms: r.ms, reason: 'renamed' });
+          });
+        }
+      })
       .catch(e => console.warn('Update failed', e));
   };
 
