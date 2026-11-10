@@ -13,6 +13,7 @@ export type EventType =
   | 'mode_switched'
   | 'schedule_set'
   | 'focus_started' | 'focus_ended' | 'focus_task_switched'
+  | 'reminders_scheduled' | 'reminder_opened'
   | 'recovery_action_done' | 'recovery_action_skipped'
   | 'recovery_step_up' | 'recovery_step_up_dismissed'
   | 'task_passed_over'
