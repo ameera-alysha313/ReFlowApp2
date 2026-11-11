@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TextInput, StyleSheet, Button, Switch, Pressable, ScrollView, Platform, BackHandler } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useTasks, Priority, TimeOfDay, Task, Subtask } from '../context/task-context';
+import { useHabits } from '../context/habit-context';
 import { useMode } from '../context/mode-context';
 import { useAuth } from '../context/auth-context';
 import StepsDraft from '../components/steps-draft';
+import { suggestPriority } from '../utils/suggest-priority';
 import { breakDownTask } from '../utils/task-breakdown';
 import { logEvent } from '../utils/log-event';
-import { useHabits } from '../context/habit-context';
-import { suggestPriority } from '../utils/suggest-priority';
 import { dateKey, tomorrowKey } from '../utils/date-key';
-import { confirmDelete } from '../utils/confirm';
+import { confirmDelete, confirmDiscard } from '../utils/confirm';
 
 const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -33,6 +33,22 @@ function dateFromKey(key: string) {
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
 }
 
+// Used to tell whether the form has unsaved changes
+type FormState = {
+  title: string; deadline: string; tag?: string; priorityOverride: Priority | null; timeOfDay?: TimeOfDay;
+  repeat: boolean; days: number[]; steps: Subtask[]; pendingStep: string; newTag: string;
+};
+const snap = (f: FormState) =>
+  JSON.stringify([
+    f.title, f.deadline, f.tag ?? null, f.priorityOverride, f.timeOfDay ?? null,
+    f.repeat, f.days, f.steps.map(s => [s.title, s.done]), f.pendingStep, f.newTag,
+  ]);
+
+// Small arrow: points right when closed, down when open
+function Chevron({ open }: { open: boolean }) {
+  return <View style={[styles.chevron, open ? styles.chevronOpen : styles.chevronClosed]} />;
+}
+
 // One form for tasks AND habits.
 //   /add-task                    -> new task
 //   /add-task?habit=1            -> new habit (Repeat switched on)
@@ -50,8 +66,10 @@ export default function AddTask() {
   const [days, setDays] = useState<number[]>(ALL_DAYS);
   const [steps, setSteps] = useState<Subtask[]>([]);
   const [pendingStep, setPendingStep] = useState('');
+  const [stepsOpen, setStepsOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [rating, setRating] = useState<{ friction?: number; stakes?: number }>({});
+  const [baseline, setBaseline] = useState<string | null>(null);
   const { mode } = useMode();
   const { user } = useAuth();
   const { addTask, updateTask, tasks, tags, addTag, deleteTask } = useTasks();
@@ -69,14 +87,21 @@ export default function AddTask() {
     setTitle(editing?.title ?? '');
     setDeadline(editing?.deadline ?? '');
     setTag(editing?.tag);
+    setNewTag('');
     setPriorityOverride(editing?.priority ?? null);
     setTimeOfDay(undefined); // "usually around" is for habits only
     setSteps((editing?.subtasks ?? []).map(s => ({ ...s })));
     setPendingStep('');
+    setStepsOpen(false);
     setRating({});
     setRepeat(!!habit && !id);
     setDays(ALL_DAYS);
     setShowPicker(false);
+    setBaseline(snap({
+      title: editing?.title ?? '', deadline: editing?.deadline ?? '', tag: editing?.tag,
+      priorityOverride: editing?.priority ?? null, timeOfDay: undefined, repeat: !!habit && !id,
+      days: ALL_DAYS, steps: editing?.subtasks ?? [], pendingStep: '', newTag: '',
+    }));
   }, [id, habit, habitId]);
 
   useEffect(() => {
@@ -85,6 +110,7 @@ export default function AddTask() {
     setTitle(editingHabit.title);
     setDeadline('');
     setTag(editingHabit.tag);
+    setNewTag('');
     setPriorityOverride(null);
     setTimeOfDay(editingHabit.timeOfDay);
     setSteps([]);
@@ -92,6 +118,11 @@ export default function AddTask() {
     setRepeat(true);
     setDays(editingHabit.days);
     setShowPicker(false);
+    setBaseline(snap({
+      title: editingHabit.title, deadline: '', tag: editingHabit.tag, priorityOverride: null,
+      timeOfDay: editingHabit.timeOfDay, repeat: true, days: editingHabit.days,
+      steps: [], pendingStep: '', newTag: '',
+    }));
   }, [habitId, editingHabit]);
 
   const habitMode = !!editingHabit || (repeat && !editing);
@@ -102,6 +133,10 @@ export default function AddTask() {
   const todayK = dateKey();
   const tomorrowK = tomorrowKey();
   const isCustomDate = !!deadline && deadline !== todayK && deadline !== tomorrowK;
+
+  const dirty =
+    baseline !== null &&
+    snap({ title, deadline, tag, priorityOverride, timeOfDay, repeat, days, steps, pendingStep, newTag }) !== baseline;
 
   const onPickDate = (e: DateTimePickerEvent, d?: Date) => {
     setShowPicker(false);
@@ -143,6 +178,7 @@ export default function AddTask() {
     setTimeOfDay(undefined);
     setSteps([]);
     setPendingStep('');
+    setStepsOpen(false);
     setRating({});
     setRepeat(false);
     setDays(ALL_DAYS);
@@ -155,6 +191,25 @@ export default function AddTask() {
     router.setParams({ id: '', habit: '', habitId: '' });
     router.back();
   };
+
+  // Back button (top left and the phone's own back button): ask first if there are unsaved changes
+  const goBack = () => (dirty ? confirmDiscard(finish) : finish());
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (dirtyRef.current) {
+          confirmDiscard(() => finishRef.current());
+          return true;
+        }
+        return false;
+      });
+      return () => sub.remove();
+    }, [])
+  );
 
   const handleSubmit = () => {
     if (!title.trim()) return;
@@ -206,10 +261,18 @@ export default function AddTask() {
 
   const heading = editingHabit ? 'Edit Habit' : editing ? 'Edit Task' : habitMode ? 'New Habit' : 'Add Task';
   const saveLabel = editingHabit || editing ? 'Save Changes' : habitMode ? 'Save Habit' : 'Save Task';
+  const stepsStale = !!editing && steps.length > 0 && title.trim() !== editing.title;
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.header}>{heading}</Text>
+      <View style={styles.topRow}>
+        <Pressable onPress={goBack} hitSlop={12}>
+          <Text style={styles.back}>‹ Back</Text>
+        </Pressable>
+        <Text style={styles.header}>{heading}</Text>
+        <View style={{ width: 50 }} />
+      </View>
+
       <TextInput
         style={styles.input}
         placeholder={habitMode ? 'Habit name' : 'Task name'}
@@ -222,6 +285,35 @@ export default function AddTask() {
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>Repeat (make this a habit)</Text>
           <Switch value={repeat} onValueChange={setRepeat} />
+        </View>
+      )}
+
+      {!habitMode && (
+        <View style={styles.stepsBlock}>
+          <Pressable style={styles.stepsHeader} onPress={() => setStepsOpen(o => !o)}>
+            <Text style={styles.stepsTitle}>
+              Small steps{steps.length > 0 ? ` (${steps.length})` : ' (optional)'}
+            </Text>
+            <Chevron open={stepsOpen} />
+          </Pressable>
+          {stepsStale && (
+            <Text style={styles.staleHint}>
+              You changed the task name, so these steps may not fit any more. Edit them, or regenerate.
+            </Text>
+          )}
+          {stepsOpen && (
+            <View style={{ marginTop: 10 }}>
+              <StepsDraft
+                steps={steps}
+                onChange={setSteps}
+                pending={pendingStep}
+                onPendingChange={setPendingStep}
+                onGenerate={generateSteps}
+                generating={generating}
+                canGenerate={!!title.trim()}
+              />
+            </View>
+          )}
         </View>
       )}
 
@@ -270,19 +362,30 @@ export default function AddTask() {
               )}
             </>
           )}
+           <>
+          <Text style={styles.label}>Priority (suggested: {suggested})</Text>
+          <View style={styles.chipRow}>
+            {PRIORITIES.map(p => (
+              <Pressable key={p} style={[styles.chip, priority === p && styles.chipSelected]} onPress={() => setPriorityOverride(p === suggested ? null : p)}>
+                <Text style={[styles.chipText, priority === p && styles.chipTextSelected]}>{p}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
+
         </>
       )}
 
       {habitMode && (
         <>
-      <Text style={styles.label}>Usually around (optional)</Text>
-      <View style={styles.chipRow}>
-        {TIMES.map(t => (
-          <Pressable key={t.key} style={[styles.chip, timeOfDay === t.key && styles.chipSelected]} onPress={() => setTimeOfDay(timeOfDay === t.key ? undefined : t.key)}>
-            <Text style={[styles.chipText, timeOfDay === t.key && styles.chipTextSelected]}>{t.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+          <Text style={styles.label}>Usually around (optional)</Text>
+          <View style={styles.chipRow}>
+            {TIMES.map(t => (
+              <Pressable key={t.key} style={[styles.chip, timeOfDay === t.key && styles.chipSelected]} onPress={() => setTimeOfDay(timeOfDay === t.key ? undefined : t.key)}>
+                <Text style={[styles.chipText, timeOfDay === t.key && styles.chipTextSelected]}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </View>
         </>
       )}
 
@@ -308,39 +411,6 @@ export default function AddTask() {
         <Text style={styles.manageLink}>Manage my tags ›</Text>
       </Pressable>
 
-      {!habitMode && (
-        <>
-          <Text style={styles.label}>Small steps (optional)</Text>
-          {!!editing && steps.length > 0 && title.trim() !== editing.title && (
-            <Text style={styles.staleHint}>
-              You changed the task name, so these steps may not fit any more. Edit them, or regenerate.
-            </Text>
-          )}
-          <StepsDraft
-            steps={steps}
-            onChange={setSteps}
-            pending={pendingStep}
-            onPendingChange={setPendingStep}
-            onGenerate={generateSteps}
-            generating={generating}
-            canGenerate={!!title.trim()}
-          />
-        </>
-      )}
-
-      {!habitMode && (
-        <>
-          <Text style={styles.label}>Priority (suggested: {suggested})</Text>
-          <View style={styles.chipRow}>
-            {PRIORITIES.map(p => (
-              <Pressable key={p} style={[styles.chip, priority === p && styles.chipSelected]} onPress={() => setPriorityOverride(p === suggested ? null : p)}>
-                <Text style={[styles.chipText, priority === p && styles.chipTextSelected]}>{p}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </>
-      )}
-
       <View style={{ marginTop: 10 }}>
         <Button title={saveLabel} onPress={handleSubmit} />
       </View>
@@ -355,9 +425,11 @@ export default function AddTask() {
 
 const styles = StyleSheet.create({
   container: { padding: 20, paddingTop: 60, paddingBottom: 40 },
-  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, color: '#111' },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  back: { color: '#4A90D9', fontSize: 16, width: 50 },
+  header: { fontSize: 24, fontWeight: 'bold', color: '#111' },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 15, color: '#111' },
-  label: { fontSize: 14, color: '#666', marginBottom: 8, marginTop: 10 },
+  label: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 8, marginTop: 10 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 },
   chip: { borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 6, paddingHorizontal: 14 },
   chipText: { color: '#333' },
@@ -367,10 +439,16 @@ const styles = StyleSheet.create({
   dayChip: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 16, paddingVertical: 8 },
   customTagRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   customTagInput: { flex: 1, marginBottom: 0 },
-  staleHint: { fontSize: 13, color: '#B26A00', marginBottom: 8 },
   manageLink: { color: '#4A90D9', fontSize: 14, marginTop: 8, marginBottom: 6 },
+  stepsBlock: { backgroundColor: 'white', borderRadius: 12, padding: 14, marginBottom: 15, borderWidth: 1, borderColor: '#e5e5e5' },
+  stepsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  stepsTitle: { fontSize: 15, fontWeight: '700', color: '#333' },
+  staleHint: { fontSize: 13, color: '#B26A00', marginTop: 8 },
+  chevron: { width: 9, height: 9, borderRightWidth: 2, borderBottomWidth: 2, borderColor: '#888', marginRight: 4 },
+  chevronClosed: { transform: [{ rotate: '-45deg' }] },
+  chevronOpen: { transform: [{ rotate: '45deg' }] },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
   switchLabel: { fontSize: 16, color: '#111' },
-  deleteButton: { marginTop: 40, alignItems: 'center', padding: 12 },
-  deleteText: { color: '#888', fontSize: 15 },
+  deleteButton: { marginTop: 30, backgroundColor: '#c0392b', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  deleteText: { color: 'white', fontSize: 16, fontWeight: '600' },
 });

@@ -14,23 +14,25 @@ import { MEDIUM_WINDOW_DAYS } from '../utils/mode-view';
 const TEST_MODE = false; // set to false for real values
 
 // ---- When does Recovery mode switch on? ----
-// Based on how long the user has been away during their WAKING hours (sleep time doesn't count),
-// not on how many reminders went out. 16 waking hours = they missed a whole waking day.
-const RECOVERY_AFTER_AWAKE_MIN = 16 * 60;
+// Based on how long the user has been away during their WAKING hours (sleep time doesn't count).
+// 6 waking hours = they missed their whole morning (e.g. woke at 9am, first open after 3pm).
+const RECOVERY_AFTER_AWAKE_MIN = 6 * 60;
 const TEST_AWAY_MS = 60 * 1000; // test mode: Recovery after one minute away
+const HEARTBEAT_MS = 60 * 1000; // "last seen" is saved this often while the app is open
 
-// ---- How many reminders? Few, spread out, and tapering off ----
-const MIN_GAP_MS = 90 * 60 * 1000; // never remind within 90 minutes of leaving the app
-const DAY1_MAX = 3;                // rest of today: up to 3 (one per time frame)
-const DAY2_MAX = 1;                // tomorrow: just the single most useful one, then silence
+// ---- How many reminders? Plenty, but spread out and tapering off ----
+const MIN_GAP_MS = 60 * 60 * 1000; // never remind within an hour of leaving the app
+const DAY_MAX = [7, 5, 3];         // reminders allowed today, tomorrow, the day after. Then silence.
 
-// Time frames, as minutes after the user's wake time. The last is dropped if it's too close to bedtime.
+// Time frames, as minutes after the user's wake time. A frame is dropped if it's too close to bedtime.
 const FRAMES = [
   { id: 'morning', off: 60 },
-  { id: 'afternoon', off: 360 },
+  { id: 'midday', off: 240 },
+  { id: 'afternoon', off: 420 },
   { id: 'evening', off: 660 },
 ] as const;
 type Frame = typeof FRAMES[number]['id'];
+const ORDER: Frame[] = FRAMES.map(f => f.id);
 
 const MESSAGES = [
   "Whenever you're ready. Even one tiny thing counts.",
@@ -81,8 +83,9 @@ function taskBody(days: number): string {
   return `Due in ${days} days. A small start now makes it lighter.`;
 }
 
-const frameOf = (t?: TimeOfDay): Frame | null =>
-  t === 'morning' ? 'morning' : t === 'afternoon' ? 'afternoon' : t ? 'evening' : null;
+// Habits with no time of day get the afternoon slot
+const frameOf = (t?: TimeOfDay): Frame =>
+  t === 'morning' ? 'morning' : t === 'evening' || t === 'night' ? 'evening' : 'afternoon';
 
 // The most pressing task as it will look at fire time (overdue first, then nearest deadline, then priority)
 function pickTask(open: Task[], at: Date): { task: Task; days: number } | null {
@@ -106,13 +109,25 @@ const habitEntry = (titles: string[], phrase: string, when: Date): Planned => ({
   kind: 'habit',
   title: titles[0],
   body: titles.length === 1
-    ? `Your ${phrase} habit. A quick one to tick off.`
-    : `Plus ${titles.length - 1} more for the ${phrase}. Quick ones.`,
+    ? (phrase ? `Your ${phrase} habit. A quick one to tick off.` : 'A quick habit to tick off.')
+    : `Plus ${titles.length - 1} more${phrase ? ` for the ${phrase}` : ''}. Quick ones.`,
   data: { kind: 'habit' },
+});
+const carryEntry = (titles: string[], when: Date): Planned => ({
+  when,
+  kind: 'habit',
+  title: titles[0],
+  body: titles.length === 1
+    ? 'Still open from earlier. A quick one?'
+    : `Plus ${titles.length - 1} more still open. Quick ones.`,
+  data: { kind: 'habit', carry: true },
 });
 const genericEntry = (when: Date, i = 0): Planned => ({
   when, kind: 'generic', title: 'ReFlo', body: MESSAGES[i % MESSAGES.length], data: { kind: 'generic' },
 });
+
+type Entry = Planned & { rank: number };
+const byTime = (a: Planned, b: Planned) => a.when.getTime() - b.when.getTime();
 
 function buildPlan(now: Date, wakeMin: number, sleepMin: number, tasks: Task[], habits: Habit[]): Planned[] {
   if (TEST_MODE) {
@@ -133,7 +148,7 @@ function buildPlan(now: Date, wakeMin: number, sleepMin: number, tasks: Task[], 
   const plan: Planned[] = [];
   let genericSlot: Date | null = null;
 
-  for (let day = 0; day < 2; day++) {
+  for (let day = 0; day < DAY_MAX.length; day++) {
     const base = startOfDayMs(now) + day * 86400000;
     const slots = FRAMES
       .filter(f => wakeMin + f.off <= end - 60) // keep at least an hour before bed
@@ -142,37 +157,52 @@ function buildPlan(now: Date, wakeMin: number, sleepMin: number, tasks: Task[], 
     if (slots.length === 0) continue;
     if (!genericSlot) genericSlot = (slots.find(s => s.id === 'afternoon') ?? slots[0]).when;
 
-    // Habits for that day, by the time frame they usually happen in
+    // Habits scheduled for that day (today's already-ticked ones are skipped)
     const dow = new Date(base).getDay();
-    const habitItems = day === 0
-      ? open.filter(t => t.habitId && t.habitDate === todayK).map(t => ({ title: t.title, frame: frameOf(t.timeOfDay) }))
-      : habits.filter(h => h.days.includes(dow)).map(h => ({ title: h.title, frame: frameOf(h.timeOfDay) }));
+    const items = habits
+      .filter(h => h.days.includes(dow))
+      .filter(h => !(day === 0 && tasks.some(t => t.habitId === h.id && t.habitDate === todayK && t.completed)))
+      .map(h => ({ title: h.title, frame: frameOf(h.timeOfDay), anytime: !h.timeOfDay }));
 
-    const entries: Planned[] = [];
-    const free = [...slots];
+    const entries: Entry[] = [];
+    const used = new Set<Frame>();
+
+    // 1) habits in their own time frame
     for (const s of slots) {
-      const hs = habitItems.filter(h => h.frame === s.id);
+      const hs = items.filter(h => h.frame === s.id);
       if (hs.length === 0) continue;
-      entries.push(habitEntry(hs.map(h => h.title), s.id, s.when));
-      free.splice(free.indexOf(s), 1);
+      entries.push({ ...habitEntry(hs.map(h => h.title), hs.every(h => h.anytime) ? '' : s.id, s.when), rank: 1 });
+      used.add(s.id);
     }
 
-    // One task reminder per day, in the first free frame (afternoon preferred)
-    const taskSlot = (['afternoon', 'morning', 'evening'] as Frame[])
+    // 2) one task reminder, in the first free frame
+    const free = slots.filter(s => !used.has(s.id));
+    const taskSlot = (['midday', 'afternoon', 'morning', 'evening'] as Frame[])
       .map(id => free.find(x => x.id === id))
       .find(Boolean);
     if (taskSlot) {
       const pick = pickTask(open, taskSlot.when);
-      if (pick) entries.push(taskEntry(pick, taskSlot.when));
+      if (pick) {
+        entries.push({ ...taskEntry(pick, taskSlot.when), rank: 0 });
+        used.add(taskSlot.id);
+      }
     }
 
-    // Keep only the most useful ones (a task beats a habit), then put them in time order
-    const limit = day === 0 ? DAY1_MAX : DAY2_MAX;
-    entries.sort((a, b) => (a.kind === 'task' ? 0 : 1) - (b.kind === 'task' ? 0 : 1) || a.when.getTime() - b.when.getTime());
-    plan.push(...entries.slice(0, limit).sort((a, b) => a.when.getTime() - b.when.getTime()));
+    // 3) habits from earlier frames that are still open, in the remaining frames
+    for (const s of slots) {
+      if (used.has(s.id)) continue;
+      const carry = items.filter(h => ORDER.indexOf(h.frame) < ORDER.indexOf(s.id));
+      if (carry.length === 0) continue;
+      entries.push({ ...carryEntry(carry.map(h => h.title), s.when), rank: 2 });
+      used.add(s.id);
+    }
+
+    // Keep the most useful ones (task, then habit, then still-open), then put them in time order
+    entries.sort((a, b) => a.rank - b.rank || byTime(a, b));
+    plan.push(...entries.slice(0, DAY_MAX[day]).sort(byTime));
   }
 
-  // Nothing specific to say? One gentle, generic nudge, no more.
+  // Nothing specific to say? One gentle, generic nudge.
   if (plan.length === 0 && genericSlot) plan.push(genericEntry(genericSlot));
   return plan;
 }
@@ -194,8 +224,6 @@ function awakeMinutesBetween(from: number, to: number, wakeMin: number, sleepMin
   return Math.round(total / 60000);
 }
 
-type Saved = { leftAt: number; ids: string[]; wakeMin?: number; sleepMin?: number };
-
 export default function Reengagement() {
   const { user } = useAuth();
   const { setMode } = useMode();
@@ -204,7 +232,7 @@ export default function Reengagement() {
   const { habits } = useHabits();
   const uid = user?.uid ?? null;
 
-  // Refs so the AppState listener always sees the latest values
+  // Refs so listeners and timers always see the latest values
   const setModeRef = useRef(setMode);
   setModeRef.current = setMode;
   const scheduleRef = useRef({ wakeMin, sleepMin });
@@ -214,6 +242,49 @@ export default function Reengagement() {
   const habitsRef = useRef(habits);
   habitsRef.current = habits;
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const run = (fn: () => Promise<void>) => {
+    queue.current = queue.current.then(fn).catch(e => console.warn('Reengagement failed', e));
+  };
+
+  // Replace every pending reminder with a fresh plan. Done when the app opens, when it closes,
+  // and shortly after tasks or habits change, so a reminder is always waiting even if the app
+  // gets killed without warning.
+  const scheduleReminders = async (log: boolean) => {
+    if (!uid) return;
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    const perm = await Notifications.getPermissionsAsync();
+    if (perm.status !== 'granted') {
+      if (log) logEvent(uid, 'reminders_scheduled', { total: 0, permission: perm.status });
+      return;
+    }
+    const { wakeMin, sleepMin } = scheduleRef.current;
+    const plan = buildPlan(new Date(), wakeMin, sleepMin, tasksRef.current, habitsRef.current);
+    for (const p of plan) {
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: { title: p.title, body: p.body, data: p.data },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: p.when,
+            channelId: 'reminders',
+          },
+        });
+      } catch (e) {
+        console.warn('Schedule failed', e);
+      }
+    }
+    if (log) {
+      logEvent(uid, 'reminders_scheduled', {
+        total: plan.length,
+        task: plan.filter(p => p.kind === 'task').length,
+        habit: plan.filter(p => p.kind === 'habit').length,
+        generic: plan.filter(p => p.kind === 'generic').length,
+        permission: perm.status,
+      });
+    }
+  };
+  const scheduleFn = useRef(scheduleReminders);
+  scheduleFn.current = scheduleReminders;
 
   // Log when a reminder is tapped (also works when the tap launched the app)
   const lastResponse = Notifications.useLastNotificationResponse();
@@ -227,76 +298,44 @@ export default function Reengagement() {
     logEvent(uid, 'reminder_opened', { kind });
   }, [uid, lastResponse]);
 
+  // Keep reminders in step with the user's tasks, habits and waking hours
   useEffect(() => {
     if (!uid) return;
-    const key = `ladder:${uid}`;
+    const t = setTimeout(() => {
+      if (AppState.currentState === 'active') run(() => scheduleFn.current(false));
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [uid, tasks, habits, wakeMin, sleepMin]);
 
-    const clearPending = async (): Promise<Saved | null> => {
-      const raw = await AsyncStorage.getItem(key);
-      if (!raw) return null;
-      const saved = JSON.parse(raw) as Saved;
-      await Promise.all((saved.ids ?? []).map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})));
-      await AsyncStorage.removeItem(key);
-      return saved;
-    };
+  useEffect(() => {
+    if (!uid) return;
+    const activeKey = `active:${uid}`; // when the app was last seen open
 
     const onOpen = async () => {
-      const saved = await clearPending();
-      if (!saved) return;
+      const raw = await AsyncStorage.getItem(activeKey);
+      const last = raw ? Number(raw) : null;
       const now = Date.now();
-      const awake = awakeMinutesBetween(
-        saved.leftAt, now,
-        saved.wakeMin ?? scheduleRef.current.wakeMin,
-        saved.sleepMin ?? scheduleRef.current.sleepMin
-      );
-      const away = TEST_MODE ? now - saved.leftAt >= TEST_AWAY_MS : awake >= RECOVERY_AFTER_AWAKE_MIN;
-      if (away) {
-        logEvent(uid, 'recovery_auto_triggered', {
-          awayMinutes: Math.round((now - saved.leftAt) / 60000),
-          awakeMinutes: awake,
-          reminders: (saved.ids ?? []).length,
-        });
-        setModeRef.current('Recovery');
+      if (last && !isNaN(last)) {
+        const awake = awakeMinutesBetween(last, now, scheduleRef.current.wakeMin, scheduleRef.current.sleepMin);
+        const away = TEST_MODE ? now - last >= TEST_AWAY_MS : awake >= RECOVERY_AFTER_AWAKE_MIN;
+        if (away) {
+          logEvent(uid, 'recovery_auto_triggered', {
+            awayMinutes: Math.round((now - last) / 60000),
+            awakeMinutes: awake,
+          });
+          setModeRef.current('Recovery');
+        }
       }
+      await AsyncStorage.setItem(activeKey, String(now));
+      await scheduleReminders(false);
     };
 
     const onLeave = async () => {
-      await clearPending();
-      const { wakeMin, sleepMin } = scheduleRef.current;
-      const now = new Date();
-      const plan = buildPlan(now, wakeMin, sleepMin, tasksRef.current, habitsRef.current);
-      const ids: string[] = [];
-      for (const p of plan) {
-        try {
-          const id = await Notifications.scheduleNotificationAsync({
-            content: { title: p.title, body: p.body, data: p.data },
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.DATE,
-              date: p.when,
-              channelId: 'reminders',
-            },
-          });
-          ids.push(id);
-        } catch (e) {
-          console.warn('Schedule failed', e);
-        }
-      }
-      // Always remember when they left, even with no reminders, so Recovery still works
-      await AsyncStorage.setItem(key, JSON.stringify({ leftAt: now.getTime(), ids, wakeMin, sleepMin } as Saved));
-      logEvent(uid, 'reminders_scheduled', {
-        total: plan.length,
-        task: plan.filter(p => p.kind === 'task').length,
-        habit: plan.filter(p => p.kind === 'habit').length,
-        generic: plan.filter(p => p.kind === 'generic').length,
-      });
+      await AsyncStorage.setItem(activeKey, String(Date.now())); // remember this FIRST
+      await scheduleReminders(true);
     };
 
-    // Run one at a time so quick open/close flips can't interleave
-    const run = (fn: () => Promise<void>) => {
-      queue.current = queue.current.then(fn).catch(e => console.warn('Reengagement failed', e));
-    };
-
-    (async () => {
+    const setup = async () => {
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('reminders', {
           name: 'Gentle reminders',
@@ -305,13 +344,18 @@ export default function Reengagement() {
       }
       const { status } = await Notifications.getPermissionsAsync();
       if (status !== 'granted') await Notifications.requestPermissionsAsync();
-    })().catch(() => {});
+    };
 
+    run(setup);
     run(onOpen); // also covers the app being opened fresh after being closed
     const sub = AppState.addEventListener('change', next => {
       run(next === 'active' ? onOpen : onLeave);
     });
-    return () => sub.remove();
+    // "Last seen" keeps ticking while the app is open, so Recovery works even if the app is killed
+    const beat = setInterval(() => {
+      if (AppState.currentState === 'active') AsyncStorage.setItem(activeKey, String(Date.now())).catch(() => {});
+    }, HEARTBEAT_MS);
+    return () => { sub.remove(); clearInterval(beat); };
   }, [uid]);
 
   return null;

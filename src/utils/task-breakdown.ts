@@ -31,10 +31,21 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+// If the AI keeps failing (no internet, bad model name), stop waiting on it for a few minutes
+let llmFails = 0;
+let llmPausedUntil = 0;
+const llmAvailable = () => Date.now() >= llmPausedUntil;
+function noteLlmFailure() {
+  llmFails += 1;
+  if (llmFails >= 2) {
+    llmPausedUntil = Date.now() + 5 * 60 * 1000;
+    llmFails = 0;
+  }
+}
+
 // friction: 0 = easy to start, 1 = hard to start
 // stakes: 0 = nothing much happens if it slips, 1 = serious consequences
 type Rule = { match: RegExp; steps: string[]; friction: number; stakes: number };
-
 const RULES: Rule[] = [
   { match: /\b(clean|tidy)\b.*\b(room|desk|bedroom|kitchen)\b/i, friction: 0.35, stakes: 0.2,
     steps: ['Put any rubbish in a bag', 'Collect dishes or cups and put them by the sink', 'Put clothes in the laundry pile', 'Clear the main surface', 'Wipe it down'] },
@@ -50,11 +61,17 @@ const RULES: Rule[] = [
     steps: ['Find the link or document you need', 'Gather the details it asks for', 'Fill in the first section', 'Finish and submit', 'Screenshot or save the confirmation'] },
 ];
 
+// The rules only know about writing, cleaning and admin. If the title mentions something else
+// ("make video for assignment"), the keyword is misleading, so don't guess.
+const NOT_A_RULE_TASK =
+  /\b(video|film|record|recording|present|presentation|slides?|poster|code|coding|program|app|website|design|prototype|demo|experiment|lab|model|build|draw|paint|photo|group|meeting|interview|survey)\b/i;
+
 function toSubtasks(titles: string[]): Subtask[] {
   return titles.map((title, i) => ({ id: `${Date.now()}-${i}`, title, done: false }));
 }
 
 function fromRules(task: Task) {
+  if (NOT_A_RULE_TASK.test(task.title)) return null;
   const hit = RULES.find(r => r.match.test(task.title));
   return hit
     ? { subtasks: toSubtasks(hit.steps), friction: hit.friction, stakes: hit.stakes }
@@ -72,10 +89,14 @@ async function fromLLM(
 ): Promise<{ subtasks: Subtask[]; friction?: number; stakes?: number; model: string }> {
   const maxSteps = mode === 'Low' || mode === 'Recovery' ? 5 : 7;
   const prompt =
-    'You help people with executive dysfunction start tasks. Break the task into ' +
-    `at most ${maxSteps} tiny, concrete steps. Each step starts with a verb and is ` +
-    'under 12 words. The first step must take under 2 minutes and need no decisions. Instructions must help user carry out task from beginning to end' +
-    'No motivational language. Also rate two things on a 1 to 5 scale. ' +
+    'You help people with executive dysfunction start tasks.' +
+    `Break the task into at most ${maxSteps} tiny, concrete steps. ` +
+    'Each step should be under 12 words. The first step must take under 2 minutes and need no decisions. ' +
+    'Instructions must help user carry out task from beginning to end. Instructions should be easily digestible. ' +
+    'Read the whole task title carefully and fit the steps to what it actually asks for ' +
+    '(for example, making a video is not the same as writing a document). ' +
+    'Do not assume the definition of acronyms, keep them as is.'+
+    'No motivational language, but keep tone conversational. Also rate two things on a 1 to 5 scale. ' +
     'difficulty: how hard the task is to START and keep going (1 = tiny and familiar, ' +
     '3 = moderate effort, 5 = large, vague or multi-hour). ' +
     'consequence: what happens if it is NOT done by its deadline (1 = almost nothing, ' +
@@ -120,6 +141,7 @@ const BY_TAG: Record<string, string[]> = {
   Personal: ['Decide what "done" looks like in one sentence', 'Do the smallest first piece', 'Note what is left'],
 };
 
+// Order: 1) the AI, which reads the whole title  2) keyword rules, if it's a plain match  3) generic steps
 export async function breakDownTask(
   task: Task,
   mode: Mode
@@ -132,14 +154,21 @@ export async function breakDownTask(
   ms: number;
 }> {
   const start = Date.now();
+
+  if (llmAvailable()) {
+    try {
+      const r = await fromLLM(task, mode);
+      llmFails = 0;
+      return { ...r, source: 'llm', ms: Date.now() - start };
+    } catch (e) {
+      noteLlmFailure();
+      console.warn('AI breakdown failed, trying rules', e);
+    }
+  }
+
   const ruled = fromRules(task);
   if (ruled) return { ...ruled, source: 'rules', ms: Date.now() - start };
-  try {
-    const r = await fromLLM(task, mode);
-    return { ...r, source: 'llm', ms: Date.now() - start };
-  } catch (e) {
-    console.warn('Breakdown fell back to generic', e);
-    const steps = (task.tag && BY_TAG[task.tag]) || GENERIC;
-    return { subtasks: toSubtasks(steps), source: 'generic', ms: Date.now() - start };
-  }
+
+  const steps = (task.tag && BY_TAG[task.tag]) || GENERIC;
+  return { subtasks: toSubtasks(steps), source: 'generic', ms: Date.now() - start };
 }

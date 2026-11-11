@@ -12,3 +12,15 @@ export function confirmDelete(title: string, message: string, onConfirm: () => v
     { text: 'Delete', style: 'destructive', onPress: onConfirm },
   ]);
 }
+
+// Shown when someone tries to leave a form with unsaved changes
+export function confirmDiscard(onDiscard: () => void) {
+  if (Platform.OS === 'web') {
+    if (window.confirm('Discard changes?\nYou have unsaved changes.')) onDiscard();
+    return;
+  }
+  Alert.alert('Discard changes?', 'You have unsaved changes.', [
+    { text: 'Keep editing', style: 'cancel' },
+    { text: 'Discard', style: 'destructive', onPress: onDiscard },
+  ]);
+}
