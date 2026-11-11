@@ -5,6 +5,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useAuth } from '../context/auth-context';
 import { logEvent } from '../utils/log-event';
 import { useTasks } from '../context/task-context';
+import { useFocusNotifications } from '../utils/use-focus-notifications';
 
 const STROKE_WIDTH = 14;
 const RADIUS = 118;
@@ -311,6 +312,13 @@ export default function Focus() {
     else if (phase === 'ready') document.title = `Break over · ${formatTime(graceLeft)}`;
     else document.title = `${centerText} · ${onBreak ? 'Break' : 'Focus'}`;
   }, [phase, centerText, onBreak, graceLeft]);
+
+  useFocusNotifications({
+  phase, kind, secondsLeft, focusedSeconds, breakBanked,
+  earnSeconds: hasTakenBreak ? REEARN_SECONDS : EARN_SECONDS,
+  breakLeft, graceLeft, graceSeconds: GRACE_SECONDS,
+  taskTitle: currentTask?.title,
+});
 
   return (
     <View style={styles.container}>

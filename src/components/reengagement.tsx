@@ -127,6 +127,16 @@ const genericEntry = (when: Date, i = 0): Planned => ({
 });
 
 type Entry = Planned & { rank: number };
+
+// Cancel only the daily reminders. Focus-session notifications (data.kind === 'focus') are left alone.
+async function cancelReminders() {
+  const pending = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    pending
+      .filter(n => (n.content.data as { kind?: string } | undefined)?.kind !== 'focus')
+      .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {}))
+  );
+}
 const byTime = (a: Planned, b: Planned) => a.when.getTime() - b.when.getTime();
 
 function buildPlan(now: Date, wakeMin: number, sleepMin: number, tasks: Task[], habits: Habit[]): Planned[] {
@@ -251,7 +261,7 @@ export default function Reengagement() {
   // gets killed without warning.
   const scheduleReminders = async (log: boolean) => {
     if (!uid) return;
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    await cancelReminders();
     const perm = await Notifications.getPermissionsAsync();
     if (perm.status !== 'granted') {
       if (log) logEvent(uid, 'reminders_scheduled', { total: 0, permission: perm.status });
@@ -259,6 +269,8 @@ export default function Reengagement() {
     }
     const { wakeMin, sleepMin } = scheduleRef.current;
     const plan = buildPlan(new Date(), wakeMin, sleepMin, tasksRef.current, habitsRef.current);
+    let failed = 0;
+    let firstError = '';
     for (const p of plan) {
       try {
         await Notifications.scheduleNotificationAsync({
@@ -269,7 +281,9 @@ export default function Reengagement() {
             channelId: 'reminders',
           },
         });
-      } catch (e) {
+      } catch (e: any) {
+        failed += 1;
+        if (!firstError) firstError = String(e?.message ?? e).slice(0, 120);
         console.warn('Schedule failed', e);
       }
     }
@@ -280,6 +294,8 @@ export default function Reengagement() {
         habit: plan.filter(p => p.kind === 'habit').length,
         generic: plan.filter(p => p.kind === 'generic').length,
         permission: perm.status,
+        failed,
+        ...(firstError ? { error: firstError } : {}),
       });
     }
   };

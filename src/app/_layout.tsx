@@ -31,6 +31,7 @@ function AppTabs() {
         <Tabs.Screen name="history" options={{ href: null }} />
         <Tabs.Screen name="habits" options={{ href: null }} />
         <Tabs.Screen name="tags" options={{ href: null }} />
+        <Tabs.Screen name="notif-check" options={{ href: null }} />
       </Tabs>
       {loading && (
         <View style={[StyleSheet.absoluteFill, styles.loading]}>

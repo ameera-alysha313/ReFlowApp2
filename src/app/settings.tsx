@@ -67,6 +67,12 @@ export default function Settings() {
         <Text style={styles.settingValue}>Manage ›</Text>
       </Pressable>
 
+      <Text style={[styles.label, { marginTop: 24 }]}>Help</Text>
+      <Pressable style={styles.settingRow} onPress={() => router.push('/notif-check' as any)}>
+        <Text style={styles.settingTitle}>Notification check</Text>
+        <Text style={styles.settingValue}>Open ›</Text>
+      </Pressable>
+
       <View style={{ marginTop: 32 }}>
         <Button title="Log out" onPress={handleLogout} />
       </View>
